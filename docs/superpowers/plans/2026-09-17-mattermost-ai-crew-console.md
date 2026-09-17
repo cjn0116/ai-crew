@@ -111,7 +111,7 @@
 - [x] Run focused tests and confirm the module is absent.
 - [x] Implement the route, navigation item, API client, and accessible views.
 - [x] Run focused tests and the Mattermost webapp build for affected packages.
-- [ ] Commit the Multica module.
+- [x] Commit the Multica module.
 
 ### Task 6: Developer workflow and end-to-end verification
 
@@ -129,4 +129,4 @@
 - [x] Add orchestration scripts and concise setup documentation.
 - [x] Run unit tests, builds, and the smoke test.
 - [x] Review the implementation against every acceptance criterion.
-- [ ] Commit the complete developer workflow.
+- [x] Commit the complete developer workflow.
