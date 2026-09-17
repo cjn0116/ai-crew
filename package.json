@@ -2,11 +2,15 @@
   "name": "ai-crew-console",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "npm run test:root && npm run test --workspace=@ai-crew/bff",
+    "test:root": "node --test tests/*.test.mjs",
+    "build": "npm run build --workspace=@ai-crew/bff"
   }
 }
-
