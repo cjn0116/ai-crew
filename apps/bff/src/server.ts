@@ -1,9 +1,13 @@
 import Fastify from 'fastify';
 
 import {runAiCrew as defaultRunAiCrew, type RunAiCrew} from './ai-crew-client.ts';
+import {loadMattermostCredentials, type MattermostCredentials} from './credentials.ts';
+import {attachMattermostWebSocketProxy} from './websocket-proxy.ts';
 
 type ServerOptions = {
   runAiCrew?: RunAiCrew;
+  credentials?: () => Promise<MattermostCredentials>;
+  fetchImpl?: typeof fetch;
 };
 
 type Credential = {
@@ -26,7 +30,10 @@ function listFromData(data: unknown, key: 'projects' | 'issues'): unknown[] | un
 
 export function buildServer(options: ServerOptions = {}) {
   const runAiCrew = options.runAiCrew ?? defaultRunAiCrew;
+  const credentials = options.credentials ?? loadMattermostCredentials;
+  const fetchImpl = options.fetchImpl ?? fetch;
   const app = Fastify({logger: false});
+  attachMattermostWebSocketProxy(app.server, credentials);
 
   app.get('/api/ai-crew/health', async () => ({ok: true, service: 'ai-crew-bff'}));
 
@@ -62,6 +69,39 @@ export function buildServer(options: ServerOptions = {}) {
       return {ok: true, workspace, [resource]: items};
     });
   }
+
+  app.route({
+    method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    url: '/api/v4/*',
+    handler: async (request, reply) => {
+      const credential = await credentials();
+      const suffix = (request.raw.url ?? '').slice('/api/v4'.length);
+      const url = `${credential.base.replace(/\/$/, '')}/mattermost/api/v4${suffix}`;
+      const headers = new Headers();
+      headers.set('authorization', `Bearer ${credential.mattermostToken}`);
+      for (const name of ['accept', 'content-type', 'if-none-match']) {
+        const value = request.headers[name];
+        if (typeof value === 'string') {
+          headers.set(name, value);
+        }
+      }
+
+      const hasBody = !['GET', 'HEAD'].includes(request.method) && request.body !== undefined;
+      const upstream = await fetchImpl(url, {
+        method: request.method,
+        headers,
+        body: hasBody ? JSON.stringify(request.body) : undefined,
+        redirect: 'manual',
+      });
+      for (const name of ['cache-control', 'content-disposition', 'content-type', 'etag', 'location']) {
+        const value = upstream.headers.get(name);
+        if (value) {
+          reply.header(name, value);
+        }
+      }
+      return reply.code(upstream.status).send(Buffer.from(await upstream.arrayBuffer()));
+    },
+  });
 
   return app;
 }

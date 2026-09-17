@@ -4,6 +4,7 @@ import test from 'node:test';
 import {loadConfig} from '../src/config.ts';
 import {redactSecrets} from '../src/redaction.ts';
 import {buildServer} from '../src/server.ts';
+import {buildMattermostWebSocketTarget} from '../src/websocket-proxy.ts';
 
 const overview = {
   ok: true,
@@ -68,4 +69,47 @@ test('serves projects and issues for a validated workspace slug', async () => {
   const invalid = await app.inject({method: 'GET', url: '/api/ai-crew/projects?workspace=../secret'});
   assert.equal(invalid.statusCode, 400);
   await app.close();
+});
+
+test('proxies Mattermost requests with only the server-side credential', async () => {
+  let received = {url: '', authorization: ''};
+
+  const app = buildServer({
+    credentials: async () => ({base: 'https://gateway.example/root', mattermostToken: 'server-secret'}),
+    fetchImpl: async (input, init) => {
+      received = {url: String(input), authorization: new Headers(init?.headers).get('authorization') ?? ''};
+      return new Response(JSON.stringify({id: 'caojn'}), {
+        status: 200,
+        headers: {'content-type': 'application/json', 'set-cookie': 'unsafe=secret'},
+      });
+    },
+  });
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/v4/users/me?active=true',
+    headers: {authorization: 'Bearer attacker-token'},
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), {id: 'caojn'});
+  assert.deepEqual(received, {
+    url: 'https://gateway.example/root/mattermost/api/v4/users/me?active=true',
+    authorization: 'Bearer server-secret',
+  });
+  assert.equal(response.headers['set-cookie'], undefined);
+
+  await app.close();
+});
+
+test('builds a secure Mattermost WebSocket target from the server credential', () => {
+  assert.deepEqual(
+    buildMattermostWebSocketTarget(
+      {base: 'https://gateway.example/root/', mattermostToken: 'server-secret'},
+      '/api/v4/websocket?connection_id=abc',
+    ),
+    {
+      url: 'wss://gateway.example/root/mattermost/api/v4/websocket?connection_id=abc',
+      headers: {authorization: 'Bearer server-secret'},
+    },
+  );
 });
