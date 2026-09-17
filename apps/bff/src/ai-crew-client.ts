@@ -1,9 +1,13 @@
 import {execFile} from 'node:child_process';
+import {homedir} from 'node:os';
+import {dirname, resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {promisify} from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const defaultPython = '/Users/jingnan/ai-crew/.venv/bin/python';
-const defaultCli = '/Users/jingnan/.codex/skills/ai-crew/scripts/ai_crew.py';
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const defaultPython = resolve(repositoryRoot, '.venv/bin/python');
+const defaultCli = resolve(homedir(), '.codex/skills/ai-crew/scripts/ai_crew.py');
 
 export type AiCrewCommand = 'whoami' | 'overview' | 'projects' | 'issues';
 export type RunAiCrew = (command: AiCrewCommand, args?: string[]) => Promise<Record<string, unknown>>;

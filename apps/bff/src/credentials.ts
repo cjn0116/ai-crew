@@ -1,6 +1,8 @@
 import {readFile} from 'node:fs/promises';
+import {homedir} from 'node:os';
+import {resolve} from 'node:path';
 
-const defaultCache = '/Users/jingnan/.codex/skills/ai-crew/.runtime/credentials_cache.json';
+const defaultCache = resolve(homedir(), '.codex/skills/ai-crew/.runtime/credentials_cache.json');
 
 export type MattermostCredentials = {
   base: string;

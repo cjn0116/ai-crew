@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import {mkdtemp, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'node:test';
 
 import {loadConfig} from '../src/config.ts';
@@ -72,12 +75,12 @@ test('serves projects and issues for a validated workspace slug', async () => {
 });
 
 test('proxies Mattermost requests with only the server-side credential', async () => {
-  let received = {url: '', authorization: ''};
+  const received: Array<{url: string; authorization: string}> = [];
 
   const app = buildServer({
     credentials: async () => ({base: 'https://gateway.example/root', mattermostToken: 'server-secret'}),
     fetchImpl: async (input, init) => {
-      received = {url: String(input), authorization: new Headers(init?.headers).get('authorization') ?? ''};
+      received.push({url: String(input), authorization: new Headers(init?.headers).get('authorization') ?? ''});
       return new Response(JSON.stringify({id: 'caojn'}), {
         status: 200,
         headers: {'content-type': 'application/json', 'set-cookie': 'unsafe=secret'},
@@ -92,12 +95,32 @@ test('proxies Mattermost requests with only the server-side credential', async (
 
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), {id: 'caojn'});
-  assert.deepEqual(received, {
-    url: 'https://gateway.example/root/mattermost/api/v4/users/me?active=true',
-    authorization: 'Bearer server-secret',
-  });
-  assert.equal(response.headers['set-cookie'], undefined);
+  const config = await app.inject({method: 'GET', url: '/config/client?format=old'});
+  assert.equal(config.statusCode, 200);
+  const plugin = await app.inject({method: 'GET', url: '/static/plugins/example/bundle.js'});
+  assert.equal(plugin.statusCode, 200);
+  assert.deepEqual(received, [
+    {url: 'https://gateway.example/root/mattermost/api/v4/users/me?active=true', authorization: 'Bearer server-secret'},
+    {url: 'https://gateway.example/root/mattermost/config/client?format=old', authorization: 'Bearer server-secret'},
+    {url: 'https://gateway.example/root/mattermost/static/plugins/example/bundle.js', authorization: 'Bearer server-secret'},
+  ]);
+  assert.match(String(response.headers['set-cookie']), /MMUSERID=ai-crew/);
+  assert.equal(String(response.headers['set-cookie']).includes('unsafe=secret'), false);
 
+  await app.close();
+});
+
+test('serves Mattermost assets and falls back to root.html for client routes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ai-crew-static-'));
+  await writeFile(join(directory, 'root.html'), '<!doctype html><title>AI Crew</title>');
+  await writeFile(join(directory, 'app.js'), 'window.ready = true;');
+  const app = buildServer({staticRoot: directory});
+
+  const asset = await app.inject({method: 'GET', url: '/static/app.js'});
+  assert.equal(asset.body, 'window.ready = true;');
+  const route = await app.inject({method: 'GET', url: '/ai-crew'});
+  assert.match(route.body, /<title>AI Crew<\/title>/);
+  assert.match(String(route.headers['set-cookie']), /MMUSERID=ai-crew/);
   await app.close();
 });
 

@@ -9,8 +9,13 @@
     "node": ">=22"
   },
   "scripts": {
+    "dev": "npm run dev --workspace=@ai-crew/bff",
+    "start": "npm run start --workspace=@ai-crew/bff",
+    "smoke": "node scripts/smoke.mjs",
     "test": "npm run test:root && npm run test --workspace=@ai-crew/bff",
     "test:root": "node --test tests/*.test.mjs",
-    "build": "npm run build --workspace=@ai-crew/bff"
+    "build": "npm run build --workspace=@ai-crew/bff",
+    "build:mattermost": "npm run customize:mattermost && AI_CREW_SKIP_IMAGE_OPTIMIZATION=1 npm run build --workspace=channels --prefix upstream/mattermost/webapp",
+    "customize:mattermost": "node scripts/apply-mattermost-customizations.mjs"
   }
 }

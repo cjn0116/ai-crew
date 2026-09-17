@@ -1,0 +1,188 @@
+.AiCrewConsole {
+    display: flex;
+    min-width: 0;
+    height: 100%;
+    flex: 1;
+    flex-direction: column;
+    grid-area: center;
+    background: var(--center-channel-bg);
+    color: var(--center-channel-color);
+
+    &__header {
+        display: flex;
+        min-height: 72px;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid rgba(var(--center-channel-color-rgb), 0.12);
+        padding: 12px 24px;
+
+        h1 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: 0;
+        }
+
+        div > span {
+            color: rgba(var(--center-channel-color-rgb), 0.64);
+            font-size: 12px;
+        }
+
+        select {
+            min-width: 180px;
+            height: 36px;
+            border: 1px solid rgba(var(--center-channel-color-rgb), 0.2);
+            border-radius: 4px;
+            background: var(--center-channel-bg);
+            color: var(--center-channel-color);
+            padding: 0 32px 0 10px;
+        }
+    }
+
+    &__tabs {
+        display: flex;
+        gap: 4px;
+        border-bottom: 1px solid rgba(var(--center-channel-color-rgb), 0.12);
+        padding: 0 24px;
+
+        button {
+            height: 44px;
+            border: 0;
+            border-bottom: 2px solid transparent;
+            background: transparent;
+            color: rgba(var(--center-channel-color-rgb), 0.72);
+            padding: 0 16px;
+            font-weight: 600;
+
+            &[aria-selected='true'] {
+                border-bottom-color: var(--button-bg);
+                color: var(--button-bg);
+            }
+        }
+    }
+
+    &__content {
+        overflow: auto;
+        flex: 1;
+        padding: 20px 24px;
+    }
+
+    &__list {
+        max-width: 1040px;
+        border: 1px solid rgba(var(--center-channel-color-rgb), 0.12);
+        border-radius: 6px;
+    }
+
+    &__row {
+        display: grid;
+        min-height: 60px;
+        align-items: center;
+        gap: 12px;
+        grid-template-columns: 24px minmax(160px, 1fr) auto auto;
+        padding: 10px 14px;
+
+        & + & {
+            border-top: 1px solid rgba(var(--center-channel-color-rgb), 0.08);
+        }
+
+        > svg {
+            color: #3d7a57;
+        }
+
+        > span:not(.AiCrewConsole__status) {
+            color: rgba(var(--center-channel-color-rgb), 0.64);
+            font-size: 12px;
+        }
+    }
+
+    &__rowMain {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+
+        strong {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        span {
+            color: rgba(var(--center-channel-color-rgb), 0.56);
+            font-size: 12px;
+        }
+    }
+
+    &__status {
+        border-radius: 4px;
+        background: rgba(var(--center-channel-color-rgb), 0.08);
+        padding: 3px 7px;
+        font-size: 12px;
+
+        &--in_progress,
+        &--open {
+            background: rgba(28, 88, 146, 0.12);
+            color: #1c5892;
+        }
+
+        &--closed {
+            color: rgba(var(--center-channel-color-rgb), 0.56);
+        }
+    }
+
+    &__state {
+        display: flex;
+        min-height: 180px;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        color: rgba(var(--center-channel-color-rgb), 0.64);
+
+        button {
+            display: inline-flex;
+            width: 32px;
+            height: 32px;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(var(--center-channel-color-rgb), 0.2);
+            border-radius: 4px;
+            background: var(--center-channel-bg);
+            color: var(--center-channel-color);
+        }
+
+        &--error strong {
+            color: #a33a3a;
+        }
+    }
+}
+
+@media (max-width: 768px) {
+    .main-wrapper:has(> .AiCrewConsole) {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    .AiCrewConsole {
+        grid-area: auto;
+
+        &__header {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 10px;
+
+            select {
+                width: min(100%, 320px);
+            }
+        }
+
+        &__content {
+            padding: 14px;
+        }
+
+        &__row {
+            grid-template-columns: 24px minmax(0, 1fr) auto;
+
+            > span:not(.AiCrewConsole__status) {
+                display: none;
+            }
+        }
+    }
+}
