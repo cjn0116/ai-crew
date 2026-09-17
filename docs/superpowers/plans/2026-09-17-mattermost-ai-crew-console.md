@@ -24,7 +24,8 @@
 **Files:**
 - Create: `.gitignore`
 - Create: `package.json`
-- Create: `upstream/mattermost/`
+- Create: `upstream/mattermost/` (Git submodule)
+- Create: `upstream/mattermost.version`
 - Create: `scripts/sync-mattermost.sh`
 - Test: `tests/upstream-baseline.test.ts`
 
@@ -130,4 +131,3 @@
 - [ ] Run unit tests, builds, and the smoke test.
 - [ ] Review the implementation against every acceptance criterion.
 - [ ] Commit the complete developer workflow.
-

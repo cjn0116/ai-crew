@@ -1,0 +1,3 @@
+[submodule "upstream/mattermost"]
+	path = upstream/mattermost
+	url = https://github.com/mattermost/mattermost.git
