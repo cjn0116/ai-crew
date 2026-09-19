@@ -428,7 +428,7 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                         disabled={!workspace}
                         onClick={() => { setView('agents'); void loadAgents(workspace); }}
                     ><FolderOutlineIcon size={18} aria-hidden='true'/><span>{'智能体'}</span></button>
-                    <div className='AiCrewConsole__projectLabel'><span>{'项目'}</span>{!loading && <small>{projects.length}</small>}</div>
+                    <div className='AiCrewConsole__projectLabel'><span>{'项目'}</span></div>
                     {!loading && !error && projects.length === 0 && <p className='AiCrewConsole__navHint'>{'暂无项目'}</p>}
                     {projects.map((project) => {
                         const key = projectKey(project);

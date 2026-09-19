@@ -62,6 +62,10 @@ describe('AiCrewConsole', () => {
 
         expect(await screen.findByText('统一应用审计')).toBeInTheDocument();
         expect(screen.getByText('优化移动端导航')).toBeInTheDocument();
+        const projectLabel = screen.getByText('项目', {selector: '.AiCrewConsole__projectLabel span'}).parentElement;
+        expect(projectLabel).toHaveTextContent('项目');
+        expect(projectLabel?.querySelector('small')).toBeNull();
+        expect(screen.getByRole('button', {name: '筛选项目：应用治理'}).querySelector('small')).toHaveTextContent('1');
 
         fireEvent.click(screen.getByRole('button', {name: '筛选项目：应用治理'}));
         expect(screen.getByText('统一应用审计')).toBeInTheDocument();
