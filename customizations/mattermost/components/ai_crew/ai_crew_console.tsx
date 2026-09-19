@@ -6,6 +6,7 @@ import type {RouteComponentProps} from 'react-router-dom';
 
 import {FolderOutlineIcon, RefreshIcon} from '@mattermost/compass-icons/components';
 
+import CrewOperations from './crew_operations';
 import ProductSwitcher from './product_switcher';
 
 type Workspace = {
@@ -33,8 +34,27 @@ type Issue = {
     };
 };
 
+type Agent = {
+    id?: string;
+    name?: string;
+    slug?: string;
+    status?: string;
+};
+
 async function getJson<T>(url: string): Promise<T> {
-    const response = await fetch(url, {headers: {accept: 'application/json'}});
+    const response = await fetch(url, {headers: {accept: 'application/json'}, cache: 'no-store'});
+    if (!response.ok) {
+        throw new Error(`Request failed with ${response.status}`);
+    }
+    return response.json() as Promise<T>;
+}
+
+async function postJson<T>(url: string, body: Record<string, string>): Promise<T> {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {'content-type': 'application/json', accept: 'application/json'},
+        body: JSON.stringify(body),
+    });
     if (!response.ok) {
         throw new Error(`Request failed with ${response.status}`);
     }
@@ -67,15 +87,38 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
     const [projects, setProjects] = useState<Project[]>([]);
     const [issues, setIssues] = useState<Issue[]>([]);
     const [selectedProject, setSelectedProject] = useState('');
+    const [view, setView] = useState<'issues' | 'agents' | 'operations'>('issues');
+    const [agents, setAgents] = useState<Agent[]>([]);
+    const [agentsLoading, setAgentsLoading] = useState(false);
+    const [agentsError, setAgentsError] = useState(false);
+    const [agentsStale, setAgentsStale] = useState(false);
+    const [creatingIssue, setCreatingIssue] = useState(false);
+    const [issueTitle, setIssueTitle] = useState('');
+    const [issueDescription, setIssueDescription] = useState('');
+    const [issueProject, setIssueProject] = useState('');
+    const [issueSubmitting, setIssueSubmitting] = useState(false);
+    const [issueCreateError, setIssueCreateError] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(false);
+    const [stale, setStale] = useState(false);
+    const [lastUpdated, setLastUpdated] = useState<number | null>(null);
     const requestSequence = useRef(0);
+    const agentsRequestSequence = useRef(0);
+    const workspaceRef = useRef('');
 
-    const loadWorkspace = useCallback(async (slug: string) => {
+    const loadWorkspace = useCallback(async (slug: string, background = false) => {
         const request = ++requestSequence.current;
-        setLoading(true);
-        setError(false);
-        setSelectedProject('');
+        if (background) {
+            setRefreshing(true);
+        } else {
+            setRefreshing(false);
+            setLoading(true);
+            setError(false);
+            setStale(false);
+            setLastUpdated(null);
+            setSelectedProject('');
+        }
         try {
             const [projectData, issueData] = await Promise.all([
                 getJson<{projects?: Project[]}>(`/api/ai-crew/projects?workspace=${encodeURIComponent(slug)}`),
@@ -86,15 +129,61 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
             }
             setProjects(projectData.projects ?? []);
             setIssues(issueData.issues ?? []);
+            setStale(false);
+            setError(false);
+            setLastUpdated(Date.now());
         } catch {
             if (request === requestSequence.current) {
-                setError(true);
-                setProjects([]);
-                setIssues([]);
+                if (background) {
+                    setStale(true);
+                } else {
+                    setError(true);
+                    setProjects([]);
+                    setIssues([]);
+                }
             }
         } finally {
             if (request === requestSequence.current) {
-                setLoading(false);
+                if (background) {
+                    setRefreshing(false);
+                    setLoading(false);
+                } else {
+                    setLoading(false);
+                }
+            }
+        }
+    }, []);
+
+    const loadAgents = useCallback(async (slug: string, background = false) => {
+        const request = ++agentsRequestSequence.current;
+        if (background) {
+            setRefreshing(true);
+        } else {
+            setAgentsLoading(true);
+        }
+        setAgentsError(false);
+        try {
+            const result = await getJson<{data?: {data?: Agent[] | {agents?: Agent[]}; agents?: Agent[]}}>(`/api/ai-crew/commands/agents?workspace=${encodeURIComponent(slug)}`);
+            if (request !== agentsRequestSequence.current) {
+                return;
+            }
+            const payload = result.data?.data ?? result.data?.agents;
+            setAgents(Array.isArray(payload) ? payload : payload?.agents ?? []);
+            setAgentsStale(false);
+            setLastUpdated(Date.now());
+        } catch {
+            if (request === agentsRequestSequence.current) {
+                setAgentsError(true);
+                setAgentsStale(true);
+            }
+        } finally {
+            if (request === agentsRequestSequence.current) {
+                if (background) {
+                    setRefreshing(false);
+                    setAgentsLoading(false);
+                } else {
+                    setAgentsLoading(false);
+                }
             }
         }
     }, []);
@@ -110,6 +199,7 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
             }
             setWorkspaces(data.workspaces);
             const first = data.workspaces[0]?.slug ?? '';
+            workspaceRef.current = first;
             setWorkspace(first);
             if (first) {
                 await loadWorkspace(first);
@@ -130,12 +220,75 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
         loadWorkspaces();
     }, []);
 
+    useEffect(() => {
+        if (!workspace) {
+            return undefined;
+        }
+        const refresh = () => {
+            if (document.visibilityState === 'visible') {
+                if (view === 'agents') {
+                    void loadAgents(workspace, true);
+                } else {
+                    void loadWorkspace(workspace, true);
+                }
+            }
+        };
+        window.addEventListener('focus', refresh);
+        document.addEventListener('visibilitychange', refresh);
+        const timer = window.setInterval(refresh, 60_000);
+        return () => {
+            window.removeEventListener('focus', refresh);
+            document.removeEventListener('visibilitychange', refresh);
+            window.clearInterval(timer);
+        };
+    }, [workspace, view, loadAgents, loadWorkspace]);
+
     const selectWorkspace = (slug: string) => {
         if (slug === workspace) {
             return;
         }
+        agentsRequestSequence.current += 1;
+        setAgents([]);
+        setAgentsError(false);
+        setAgentsStale(false);
+        workspaceRef.current = slug;
         setWorkspace(slug);
+        setIssueProject('');
         loadWorkspace(slug);
+        if (view === 'agents') {
+            void loadAgents(slug);
+        }
+    };
+
+    const createIssue = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!workspace || !issueTitle.trim()) {
+            return;
+        }
+        const createdWorkspace = workspace;
+        const body: Record<string, string> = {title: issueTitle.trim(), workspace: createdWorkspace};
+        if (issueDescription.trim()) {
+            body.description = issueDescription.trim();
+        }
+        if (issueProject) {
+            body.project = issueProject;
+        }
+        setIssueSubmitting(true);
+        setIssueCreateError(false);
+        try {
+            await postJson('/api/ai-crew/commands/issue-new', body);
+            setCreatingIssue(false);
+            setIssueTitle('');
+            setIssueDescription('');
+            setIssueProject('');
+            if (workspaceRef.current === createdWorkspace) {
+                await loadWorkspace(createdWorkspace, true);
+            }
+        } catch {
+            setIssueCreateError(true);
+        } finally {
+            setIssueSubmitting(false);
+        }
     };
 
     const activeWorkspace = workspaces.find((item) => item.slug === workspace);
@@ -182,13 +335,26 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                     <button
                         type='button'
                         aria-label='显示全部工单'
-                        aria-current={selectedProject ? undefined : 'page'}
-                        onClick={() => setSelectedProject('')}
+                        aria-current={view === 'issues' && !selectedProject ? 'page' : undefined}
+                        onClick={() => { setView('issues'); setSelectedProject(''); }}
                     >
                         <FolderOutlineIcon size={18} aria-hidden='true'/>
                         <span>{'全部工单'}</span>
                         {!loading && <small>{issues.length}</small>}
                     </button>
+                    <button
+                        type='button'
+                        aria-label='显示智能体'
+                        aria-current={view === 'agents' ? 'page' : undefined}
+                        disabled={!workspace}
+                        onClick={() => { setView('agents'); void loadAgents(workspace); }}
+                    ><FolderOutlineIcon size={18} aria-hidden='true'/><span>{'智能体'}</span></button>
+                    <button
+                        type='button'
+                        aria-label='显示班组操作'
+                        aria-current={view === 'operations' ? 'page' : undefined}
+                        onClick={() => setView('operations')}
+                    ><FolderOutlineIcon size={18} aria-hidden='true'/><span>{'班组操作'}</span></button>
                     <div className='AiCrewConsole__projectLabel'><span>{'项目'}</span>{!loading && <small>{projects.length}</small>}</div>
                     {!loading && !error && projects.length === 0 && <p className='AiCrewConsole__navHint'>{'暂无项目'}</p>}
                     {projects.map((project) => {
@@ -199,8 +365,8 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                                 type='button'
                                 aria-label={`筛选项目：${project.title}`}
                                 title={project.title}
-                                aria-current={selectedProject === key ? 'page' : undefined}
-                                onClick={() => setSelectedProject(key)}
+                                aria-current={view === 'issues' && selectedProject === key ? 'page' : undefined}
+                                onClick={() => { setView('issues'); setSelectedProject(key); }}
                             >
                                 <FolderOutlineIcon size={16} aria-hidden='true'/>
                                 <span>{project.title}</span>
@@ -215,19 +381,50 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                 <header className='AiCrewConsole__header channel-header'>
                     <div className='AiCrewConsole__heading'>
                         <FolderOutlineIcon size={20} aria-hidden='true'/>
-                        <h1 className='heading' title={activeProject?.title ?? '全部工单'}>{activeProject?.title ?? '全部工单'}</h1>
+                        <h1 className='heading' title={view === 'agents' ? '智能体' : view === 'operations' ? '班组操作' : activeProject?.title ?? '全部工单'}>{view === 'agents' ? '智能体' : view === 'operations' ? '班组操作' : activeProject?.title ?? '全部工单'}</h1>
                         <span>{activeWorkspace?.workspace ?? 'Multica'}</span>
                     </div>
-                    {!loading && !error && <span className='AiCrewConsole__count'>{visibleIssues.length}{' 个工单'}</span>}
+                    <div className='AiCrewConsole__headerActions'>
+                        {lastUpdated && <span className='AiCrewConsole__updated'>{`上次更新 ${new Date(lastUpdated).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'})}`}</span>}
+                        {view === 'issues' && !loading && !error && <span className='AiCrewConsole__count'>{visibleIssues.length}{' 个工单'}</span>}
+                        {view === 'issues' && !loading && !error && <button type='button' className='AiCrewConsole__newIssue' aria-label='新建工单' onClick={() => setCreatingIssue(true)}>{'新建工单'}</button>}
+                        <button
+                            type='button'
+                            className='AiCrewConsole__refresh'
+                            aria-label='刷新当前小组'
+                            title='刷新当前小组'
+                            disabled={!workspace || loading || refreshing}
+                            onClick={() => void (view === 'agents' ? loadAgents(workspace, true) : loadWorkspace(workspace, true))}
+                        ><RefreshIcon size={16}/></button>
+                    </div>
                 </header>
 
                 <div
                     className='AiCrewConsole__content'
                     aria-live='polite'
                     aria-label='工单内容'
-                    aria-busy={loading}
+                    aria-busy={view === 'agents' ? agentsLoading : loading}
                 >
-                    {loading && (
+                    {view === 'agents' && (
+                        <div className='AiCrewConsole__agents'>
+                            {agentsLoading && <p role='status'>{'正在载入智能体...'}</p>}
+                            {!agentsLoading && agentsError && <p role='alert'>{agentsStale && agents.length ? '刷新失败，显示上次成功获取的数据。' : '智能体载入失败'}</p>}
+                            {!agentsLoading && !agentsError && agents.length === 0 && <p>{'当前小组暂无智能体'}</p>}
+                            {!agentsLoading && agents.map((agent) => <article key={agent.id ?? agent.slug ?? agent.name} className='AiCrewConsole__agent'><strong>{agent.name ?? agent.slug ?? agent.id}</strong>{agent.status && <span>{agent.status}</span>}</article>)}
+                        </div>
+                    )}
+                    {view === 'operations' && <CrewOperations workspace={workspace}/>}
+                    {view === 'issues' && creatingIssue && (
+                        <form className='AiCrewConsole__issueForm' onSubmit={createIssue}>
+                            <label>{'工单标题'}<input aria-label='工单标题' value={issueTitle} onChange={(event) => setIssueTitle(event.target.value)} required maxLength={200}/></label>
+                            <label>{'描述'}<textarea aria-label='描述' value={issueDescription} onChange={(event) => setIssueDescription(event.target.value)}/></label>
+                            <label>{'项目'}<select aria-label='项目' value={issueProject} onChange={(event) => setIssueProject(event.target.value)}><option value=''>{'不指定项目'}</option>{projects.filter((project) => project.id).map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label>
+                            {issueCreateError && <p role='alert'>{'创建工单失败，请重试。'}</p>}
+                            <div><button type='submit' disabled={issueSubmitting || !issueTitle.trim()}>{issueSubmitting ? '创建中...' : '创建工单'}</button><button type='button' onClick={() => setCreatingIssue(false)}>{'取消'}</button></div>
+                        </form>
+                    )}
+                    {view === 'issues' && stale && <p className='AiCrewConsole__stale' role='alert'>{'刷新失败，显示上次成功获取的数据。'}</p>}
+                    {view === 'issues' && loading && (
                         <div className='AiCrewConsole__loading'>
                             <div className='AiCrewConsole__loadingLabel' role='status'>{'正在载入...'}</div>
                             <div aria-hidden='true' className='AiCrewConsole__skeleton'>
@@ -235,7 +432,7 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                             </div>
                         </div>
                     )}
-                    {!loading && error && (
+                    {view === 'issues' && !loading && error && (
                         <div className='AiCrewConsole__state AiCrewConsole__state--error'>
                             <span className='AiCrewConsole__stateIcon' aria-hidden='true'><RefreshIcon size={28}/></span>
                             <strong>{'暂时无法载入 Multica 数据'}</strong>
@@ -247,14 +444,14 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                             ><RefreshIcon size={16}/><span>{'重新加载'}</span></button>
                         </div>
                     )}
-                    {!loading && !error && visibleIssues.length === 0 && (
+                    {view === 'issues' && !loading && !error && visibleIssues.length === 0 && (
                         <div className='AiCrewConsole__state'>
                             <span className='AiCrewConsole__stateIcon' aria-hidden='true'><FolderOutlineIcon size={28}/></span>
                             <strong>{selectedProject ? '当前项目暂无工单' : '当前小组暂无工单'}</strong>
                             <p>{selectedProject ? '选择其他项目，或查看全部工单。' : '工单将在这里按项目集中展示。'}</p>
                         </div>
                     )}
-                    {!loading && !error && visibleIssues.length > 0 && (
+                    {view === 'issues' && !loading && !error && visibleIssues.length > 0 && (
                         <div className='AiCrewConsole__list'>
                             <div className='AiCrewConsole__listHeading' aria-hidden='true'><span>{'工单'}</span><span>{'状态'}</span></div>
                             {visibleIssues.map((issue, index) => (

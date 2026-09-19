@@ -6,7 +6,9 @@ import type {ReadableStream as NodeReadableStream} from 'node:stream/web';
 import {fileURLToPath} from 'node:url';
 
 import {runAiCrew as defaultRunAiCrew, type RunAiCrew} from './ai-crew-client.ts';
+import {CommandValidationError, encodeCrewCommand} from './crew-commands.ts';
 import {loadMattermostCredentials, type MattermostCredentials} from './credentials.ts';
+import {redactSecrets} from './redaction.ts';
 import {attachMattermostWebSocketProxy} from './websocket-proxy.ts';
 
 type ServerOptions = {
@@ -22,6 +24,19 @@ type Credential = {
 };
 
 const workspacePattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+function rejectEncodedMmGetPath(rawUrl: string | undefined) {
+  if (!rawUrl) {
+    return;
+  }
+  const queryStart = rawUrl.indexOf('?');
+  const rawQuery = queryStart === -1 ? '' : rawUrl.slice(queryStart + 1);
+  const path = new URLSearchParams(rawQuery).get('path');
+  const pathname = path?.split('?', 1)[0];
+  if (pathname && /%(?:25|2e|2f|5c)/i.test(pathname)) {
+    throw new CommandValidationError('path must not contain double-encoded characters or traversal');
+  }
+}
 
 function listFromData(data: unknown, key: 'projects' | 'issues'): unknown[] | undefined {
   if (Array.isArray(data)) {
@@ -50,6 +65,35 @@ export function buildServer(options: ServerOptions = {}) {
   ) : options.staticRoot;
 
   app.get('/api/ai-crew/health', async () => ({ok: true, service: 'ai-crew-bff'}));
+
+  const runCommand = async (name: string, method: string, input: unknown, rawUrl: string | undefined, requestId: string, reply: FastifyReply) => {
+    try {
+      if (name === 'mm-get' && method === 'GET') {
+        rejectEncodedMmGetPath(rawUrl);
+      }
+      const encoded = encodeCrewCommand(name, method, input ?? {});
+      const result = await runAiCrew(encoded.command, encoded.args);
+      if (!result || typeof result !== 'object' || Array.isArray(result)) {
+        return reply.code(502).send({ok: false, error: 'ai-crew command failed', requestId});
+      }
+      if (result.ok !== true && !(name === 'verify' && result.ok === false)) {
+        return reply.code(502).send({ok: false, error: 'ai-crew command failed', requestId});
+      }
+      return {ok: true, command: encoded.command, data: redactSecrets(result)};
+    } catch (error) {
+      if (error instanceof CommandValidationError) {
+        return reply.code(400).send({ok: false, error: error.message});
+      }
+      return reply.code(502).send({ok: false, error: 'ai-crew command unavailable', requestId});
+    }
+  };
+
+  app.get<{Params: {name: string}; Querystring: Record<string, unknown>}>('/api/ai-crew/commands/:name', (request, reply) =>
+    runCommand(request.params.name, request.method, request.query, request.raw.url, request.id, reply),
+  );
+  app.post<{Params: {name: string}; Body: unknown}>('/api/ai-crew/commands/:name', (request, reply) =>
+    runCommand(request.params.name, request.method, request.body, request.raw.url, request.id, reply),
+  );
 
   app.get('/api/ai-crew/me', async (_request, reply) => {
     const result = await runAiCrew('whoami');

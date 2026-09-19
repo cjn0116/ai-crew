@@ -9,7 +9,31 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../.
 const defaultPython = resolve(repositoryRoot, '.venv/bin/python');
 const defaultCli = resolve(homedir(), '.codex/skills/ai-crew/scripts/ai_crew.py');
 
-export type AiCrewCommand = 'whoami' | 'overview' | 'projects' | 'issues';
+export type AiCrewCommand =
+  | 'login'
+  | 'fetch'
+  | 'rotate'
+  | 'whoami'
+  | 'verify'
+  | 'teams'
+  | 'channels'
+  | 'posts'
+  | 'digest'
+  | 'find-user'
+  | 'say'
+  | 'join'
+  | 'create-team'
+  | 'create-channel'
+  | 'team-add'
+  | 'post-delete'
+  | 'channel-delete'
+  | 'overview'
+  | 'workspaces'
+  | 'agents'
+  | 'projects'
+  | 'issues'
+  | 'issue-new'
+  | 'mm-get';
 export type RunAiCrew = (command: AiCrewCommand, args?: string[]) => Promise<Record<string, unknown>>;
 
 export const runAiCrew: RunAiCrew = async (command, args = []) => {

@@ -55,7 +55,18 @@ window open while using the app; press **Control+C** to stop the service.
 
 The product menu contains exactly two destinations, with the current product
 highlighted and no checkboxes. Multica supports workspace switching, project
-filtering, and issue status display.
+filtering, agent and issue views, and issue creation. Issue data refreshes when
+the page gains focus, when it becomes visible, every 60 seconds while visible,
+and when you press the refresh button. The page shows the last successful
+update time and marks older data when a refresh fails.
+
+The **班组操作** view exposes the remaining ai-crew commands: connection status
+and diagnostics, teams and channels, message records and summaries, member
+lookup, sending and replying, team and channel management, and confirmed
+deletion. Mattermost remains the primary conversation view. The native menus
+show the collaboration controls supported by ai-crew and omit unrelated
+marketplace, admin, cloud, and plugin entry points. This is a UI reduction;
+Mattermost server permissions still control access to direct API requests.
 
 ## Configuration
 
@@ -88,7 +99,8 @@ npm run build
 # Apply overlays before running the focused frontend tests
 npm run customize:mattermost
 npm test --prefix upstream/mattermost/webapp/channels -- --runInBand \
-  ai_crew_console.test.tsx ai_crew_page.test.tsx product_switcher.test.tsx \
+  --reporters=default ai_crew_console.test.tsx crew_operations.test.tsx \
+  ai_crew_page.test.tsx product_switcher.test.tsx \
   global_header/left_controls/product_menu/product_menu.test.tsx
 
 # Build browser assets after changing the UI, then reload the browser
@@ -100,8 +112,12 @@ npm run build:mattermost
 with `npm audit --omit=dev`.
 
 With the service running and valid credentials, run `npm run smoke` to check the
-live identity, Multica workspace, Mattermost user and WebSocket paths. Unit tests
-use fixtures and do not require a live account.
+live identity, Multica workspace and issue metadata, selected Mattermost channel
+post metadata, the `/ai-crew` page, and the Mattermost WebSocket. The smoke test
+compares current ai-crew CLI records with BFF responses and prints identifiers,
+counts and timestamps only. It does not send messages or create, change, or
+delete production records. Mutation flows are covered by tests with fakes.
+Unit tests do not require a live account.
 
 ## Repository layout and upstream changes
 
@@ -136,3 +152,8 @@ for additional context.
   skill login and check the CLI/credential paths and gateway connectivity.
 - **UI changes are not visible:** rebuild with `npm run build:mattermost`, then reload
   the browser. Applying the overlay alone does not update the served assets.
+- **Messages or issues look unchanged:** press the Multica refresh button or
+  reload Mattermost, then run `npm run smoke`. The smoke output includes the
+  latest issue and selected channel post IDs and times; unchanged IDs with a
+  passing comparison mean the current CLI and BFF also have no newer records.
+  A failed comparison identifies a stale BFF or an unavailable upstream read.

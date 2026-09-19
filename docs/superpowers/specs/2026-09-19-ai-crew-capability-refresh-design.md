@@ -10,7 +10,7 @@ Keep Mattermost v11.1.1 for conversations. The BFF remains the only credential h
 
 ## Freshness diagnosis and behavior
 
-Compare the same workspaces, issue identifiers, and channel post timestamps at the CLI, BFF, and browser boundaries. Preserve the exact failed boundary as a regression test before fixing it. Multica data reloads on page entry, workspace change, focus or visibility return, and manual refresh. Show the last successful update time and an error state if refresh fails; keep the last good data visible with a stale label. Mattermost retains its WebSocket updates and refetches the active channel after reconnect. Rebuilding frontend assets and restarting BFF are part of browser verification.
+Compare the same workspaces, issue identifiers, and channel post timestamps at the CLI, BFF, and browser boundaries. Preserve the exact failed boundary as a regression test before fixing it. Multica data reloads on page entry, workspace change, focus or visibility return, a 60-second interval while visible, and manual refresh. Show the last successful update time and an error state if refresh fails; keep the last good data visible with a stale label. Mattermost retains its WebSocket updates and refetches the active channel after reconnect. Rebuilding frontend assets and restarting BFF are part of browser verification.
 
 ## Capability coverage
 

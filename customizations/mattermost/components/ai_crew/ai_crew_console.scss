@@ -1,6 +1,7 @@
 @use 'components/widgets/team_icon/team_icon';
 @use 'components/sidebar/sidebar_header/sidebar_header';
 @use 'layout/headers';
+@use './crew_operations';
 @use './product_switcher';
 
 // Typography and geometry follow Mattermost v11.1.1. Only theme colors differ.
@@ -199,7 +200,14 @@ button, a {
             text-overflow: ellipsis;
         }
     }
-    &__count { flex-shrink: 0; color: var(--multica-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    &__headerActions { display: flex; flex-shrink: 0; align-items: center; gap: 12px; }
+    &__count, &__updated { color: var(--multica-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    &__refresh { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--multica-accent); &:hover { background: var(--multica-hover); } &:disabled { opacity: 0.5; cursor: default; } }
+    &__newIssue { padding: 5px 10px; border: 0; border-radius: 6px; background: var(--multica-accent); color: #fff; font-size: 12px; font-weight: 600; }
+    &__stale { margin: 0; padding: 8px 24px; border-bottom: 1px solid var(--multica-border); background: #fff4db; color: #684b17; font-size: 12px; }
+    &__agents { padding: 24px; color: var(--multica-muted); }
+    &__agent { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--multica-border); color: var(--multica-ink); }
+    &__issueForm { display: grid; gap: 12px; margin: 16px 24px; padding: 16px; border: 1px solid var(--multica-border); border-radius: 8px; background: var(--multica-panel); label { display: grid; gap: 4px; } input, textarea, select { width: 100%; min-height: 32px; padding: 6px 8px; border: 1px solid var(--multica-border); border-radius: 6px; background: var(--multica-card); color: var(--multica-ink); } textarea { min-height: 72px; resize: vertical; } > div { display: flex; gap: 8px; } button { padding: 6px 12px; border: 0; border-radius: 6px; background: var(--multica-accent); color: #fff; } button[type='button'] { background: transparent; color: var(--multica-ink); } }
     &__content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
     &__list { width: 100%; }
     &__listHeading {
