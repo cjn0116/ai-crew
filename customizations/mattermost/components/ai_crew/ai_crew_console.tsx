@@ -1,10 +1,10 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import type {RouteComponentProps} from 'react-router-dom';
 
-import {FolderOutlineIcon, RefreshIcon} from '@mattermost/compass-icons/components';
+import {CogOutlineIcon, FolderOutlineIcon, RefreshIcon} from '@mattermost/compass-icons/components';
 
 import CrewOperations from './crew_operations';
 import ProductSwitcher from './product_switcher';
@@ -25,6 +25,7 @@ type Project = {
 type Issue = {
     id?: string;
     title: string;
+    description?: string | null;
     status?: string;
     identifier?: string;
     project_id?: string;
@@ -32,6 +33,39 @@ type Issue = {
         id?: string;
         title?: string;
     };
+};
+
+type IssueDescriptionProps = {
+    description: string;
+    expanded: boolean;
+    issueLabel: string;
+    onToggle: () => void;
+};
+
+const IssueDescription: React.FC<IssueDescriptionProps> = ({description, expanded, issueLabel, onToggle}) => {
+    const paragraphRef = useRef<HTMLParagraphElement>(null);
+    const [truncated, setTruncated] = useState(false);
+
+    useLayoutEffect(() => {
+        if (expanded || !paragraphRef.current) {
+            return undefined;
+        }
+        const paragraph = paragraphRef.current;
+        const measure = () => setTruncated(paragraph.scrollHeight > paragraph.clientHeight + 1);
+        measure();
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+        observer?.observe(paragraph);
+        window.addEventListener('resize', measure);
+        return () => {
+            observer?.disconnect();
+            window.removeEventListener('resize', measure);
+        };
+    }, [description, expanded]);
+
+    return <div className='AiCrewConsole__issueBody'>
+        <p ref={paragraphRef} className={`AiCrewConsole__issueDescription${expanded ? ' AiCrewConsole__issueDescription--expanded' : ''}`}>{description}</p>
+        {truncated && <button type='button' aria-label={`${expanded ? '收起' : '展开'} ${issueLabel} 内容`} aria-expanded={expanded} onClick={onToggle}>{expanded ? '收起内容' : '查看全文'}</button>}
+    </div>;
 };
 
 type Agent = {
@@ -88,6 +122,8 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
     const [issues, setIssues] = useState<Issue[]>([]);
     const [selectedProject, setSelectedProject] = useState('');
     const [view, setView] = useState<'issues' | 'agents' | 'operations'>('issues');
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [expandedIssueId, setExpandedIssueId] = useState<string | null>(null);
     const [agents, setAgents] = useState<Agent[]>([]);
     const [agentsLoading, setAgentsLoading] = useState(false);
     const [agentsError, setAgentsError] = useState(false);
@@ -106,6 +142,8 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
     const requestSequence = useRef(0);
     const agentsRequestSequence = useRef(0);
     const workspaceRef = useRef('');
+    const settingsRef = useRef<HTMLDivElement>(null);
+    const settingsButtonRef = useRef<HTMLButtonElement>(null);
 
     const loadWorkspace = useCallback(async (slug: string, background = false) => {
         const request = ++requestSequence.current;
@@ -221,6 +259,19 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
     }, []);
 
     useEffect(() => {
+        if (!settingsOpen) {
+            return undefined;
+        }
+        const closeOutside = (event: PointerEvent) => {
+            if (!event.composedPath().includes(settingsRef.current as EventTarget)) {
+                setSettingsOpen(false);
+            }
+        };
+        document.addEventListener('pointerdown', closeOutside);
+        return () => document.removeEventListener('pointerdown', closeOutside);
+    }, [settingsOpen]);
+
+    useEffect(() => {
         if (!workspace) {
             return undefined;
         }
@@ -254,6 +305,7 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
         workspaceRef.current = slug;
         setWorkspace(slug);
         setIssueProject('');
+        setExpandedIssueId(null);
         loadWorkspace(slug);
         if (view === 'agents') {
             void loadAgents(slug);
@@ -310,19 +362,46 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                     className='AiCrewConsole__workspaceRail'
                     aria-label='小组'
                 >
-                    {workspaces.map((item) => (
+                    <div className='AiCrewConsole__workspaceList'>
+                        {workspaces.map((item) => (
+                            <button
+                                key={item.slug}
+                                className={`TeamIcon TeamIcon__sm${workspace === item.slug ? ' active' : ''}`}
+                                type='button'
+                                aria-label={`切换到小组：${item.workspace}`}
+                                aria-current={workspace === item.slug ? 'page' : undefined}
+                                title={item.workspace}
+                                onClick={() => selectWorkspace(item.slug)}
+                            >
+                                <span className='TeamIcon__content'><span className='TeamIcon__initials TeamIcon__initials__sm'>{workspaceMark(item)}</span></span>
+                            </button>
+                        ))}
+                    </div>
+                    <div
+                        ref={settingsRef}
+                        className='AiCrewConsole__settings'
+                        onKeyDown={(event) => {
+                            if (event.key === 'Escape' && settingsOpen) {
+                                event.preventDefault();
+                                setSettingsOpen(false);
+                                settingsButtonRef.current?.focus();
+                            }
+                        }}
+                    >
                         <button
-                            key={item.slug}
-                            className={`TeamIcon TeamIcon__sm${workspace === item.slug ? ' active' : ''}`}
+                            ref={settingsButtonRef}
                             type='button'
-                            aria-label={`切换到小组：${item.workspace}`}
-                            aria-current={workspace === item.slug ? 'page' : undefined}
-                            title={item.workspace}
-                            onClick={() => selectWorkspace(item.slug)}
-                        >
-                            <span className='TeamIcon__content'><span className='TeamIcon__initials TeamIcon__initials__sm'>{workspaceMark(item)}</span></span>
-                        </button>
-                    ))}
+                            className='AiCrewConsole__settingsButton'
+                            aria-label='设置'
+                            aria-haspopup='menu'
+                            aria-expanded={settingsOpen}
+                            aria-controls={settingsOpen ? 'ai-crew-settings-menu' : undefined}
+                            onClick={() => setSettingsOpen((open) => !open)}
+                        ><CogOutlineIcon size={20} aria-hidden='true'/></button>
+                        {settingsOpen && <div id='ai-crew-settings-menu' className='AiCrewConsole__settingsMenu' role='menu' aria-label='设置菜单'>
+                            <button type='button' role='menuitem' onClick={() => { setView('operations'); setSettingsOpen(false); }}>{'班组操作'}</button>
+                        </div>}
+                    </div>
                 </nav>
 
                 <nav
@@ -349,12 +428,6 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                         disabled={!workspace}
                         onClick={() => { setView('agents'); void loadAgents(workspace); }}
                     ><FolderOutlineIcon size={18} aria-hidden='true'/><span>{'智能体'}</span></button>
-                    <button
-                        type='button'
-                        aria-label='显示班组操作'
-                        aria-current={view === 'operations' ? 'page' : undefined}
-                        onClick={() => setView('operations')}
-                    ><FolderOutlineIcon size={18} aria-hidden='true'/><span>{'班组操作'}</span></button>
                     <div className='AiCrewConsole__projectLabel'><span>{'项目'}</span>{!loading && <small>{projects.length}</small>}</div>
                     {!loading && !error && projects.length === 0 && <p className='AiCrewConsole__navHint'>{'暂无项目'}</p>}
                     {projects.map((project) => {
@@ -453,23 +526,27 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                     )}
                     {view === 'issues' && !loading && !error && visibleIssues.length > 0 && (
                         <div className='AiCrewConsole__list'>
-                            <div className='AiCrewConsole__listHeading' aria-hidden='true'><span>{'工单'}</span><span>{'状态'}</span></div>
-                            {visibleIssues.map((issue, index) => (
-                                <article
-                                    className='AiCrewConsole__row'
-                                    key={issue.id ?? `${issue.title}-${index}`}
-                                >
+                            <div className='AiCrewConsole__listHeading' aria-hidden='true'><span>{'标题与内容'}</span><span>{'状态'}</span></div>
+                            {visibleIssues.map((issue, index) => {
+                                const issueKey = issue.id ?? issue.identifier ?? `${issue.title}-${index}`;
+                                const expanded = expandedIssueId === issueKey;
+                                const description = typeof issue.description === 'string' ? issue.description.trim() : '';
+                                const issueLabel = issue.identifier ?? issue.title;
+                                return <article className='AiCrewConsole__row' key={issueKey}>
                                     <span className={`AiCrewConsole__issueIcon AiCrewConsole__issueIcon--${issue.status ?? 'unset'}`} aria-hidden='true'/>
                                     <div className='AiCrewConsole__rowMain'>
-                                        <span className='AiCrewConsole__issueTitle' title={issue.title}>{issue.title}</span>
-                                        {issue.identifier && <span>{issue.identifier}</span>}
+                                        <div className='AiCrewConsole__issueHeader'>
+                                            <strong className='AiCrewConsole__issueTitle' title={issue.title}>{issue.title}</strong>
+                                            {issue.identifier && <span className='AiCrewConsole__issueIdentifier'>{issue.identifier}</span>}
+                                        </div>
+                                        {description && <IssueDescription description={description} expanded={expanded} issueLabel={issueLabel} onToggle={() => setExpandedIssueId(expanded ? null : issueKey)}/>}
                                     </div>
                                     <span className={`AiCrewConsole__status AiCrewConsole__status--${issue.status ?? 'unset'}`}>
                                         <i aria-hidden='true'/>
                                         {statusLabel(issue.status)}
                                     </span>
-                                </article>
-                            ))}
+                                </article>;
+                            })}
                         </div>
                     )}
                 </div>

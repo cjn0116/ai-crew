@@ -89,14 +89,62 @@ button, a {
     }
 
     &__workspaceRail {
+        position: relative;
+        z-index: 3;
         display: flex;
         align-items: center;
         flex-direction: column;
-        gap: 12px;
+        min-height: 0;
         padding: 4px 0 12px;
-        overflow-y: auto;
-
         button.TeamIcon { flex-shrink: 0; padding: 0; color: var(--multica-ink); }
+    }
+
+    &__workspaceList {
+        display: flex;
+        width: 100%;
+        min-height: 0;
+        flex: 1;
+        align-items: center;
+        flex-direction: column;
+        gap: 12px;
+        overflow-y: auto;
+    }
+
+    &__settings { position: relative; flex-shrink: 0; margin-top: 12px; }
+    &__settingsButton {
+        display: flex;
+        width: 36px;
+        height: 36px;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--multica-ink);
+        &:hover, &[aria-expanded='true'] { background: var(--multica-panel); }
+    }
+    &__settingsMenu {
+        position: absolute;
+        z-index: 5;
+        bottom: 0;
+        left: calc(100% + 8px);
+        width: 164px;
+        padding: 6px;
+        border: 1px solid var(--multica-border);
+        border-radius: 8px;
+        background: var(--multica-card);
+        box-shadow: 0 8px 24px rgba(var(--multica-ink-rgb), 0.16);
+        > button {
+            display: block;
+            width: 100%;
+            padding: 8px 10px;
+            border: 0;
+            border-radius: 5px;
+            background: transparent;
+            color: var(--multica-ink);
+            text-align: left;
+            &:hover { background: var(--multica-panel); }
+        }
     }
 
     &__projectNav {
@@ -240,18 +288,37 @@ button, a {
         height: 12px;
         border: 1.5px solid var(--multica-muted);
         border-radius: 50%;
-        &--todo, &--open { border-color: var(--multica-accent); background: var(--multica-glacier-blue); }
-        &--in_review, &--in_progress { border-color: var(--multica-violet-ink); background: var(--multica-glacier-violet); }
-        &--done, &--closed { border-color: var(--multica-muted); background: var(--multica-glacier-slate); }
+        &--todo, &--open { border-color: #1d63a6; background: #79b8f3; }
+        &--in_review { border-color: #7a5800; background: #ffd35a; }
+        &--in_progress { border-color: var(--multica-violet-ink); background: var(--multica-glacier-violet); }
+        &--done { border-color: #237a4b; background: #49b97a; }
+        &--closed { border-color: var(--multica-muted); background: var(--multica-glacier-slate); }
     }
     &__rowMain {
         display: flex;
         min-width: 0;
-        align-items: baseline;
-        gap: 12px;
-        .AiCrewConsole__issueTitle { order: 1; min-width: 0; overflow: hidden; color: var(--multica-ink); font: inherit; white-space: nowrap; text-overflow: ellipsis; }
-        > span:not(.AiCrewConsole__issueTitle) { flex-shrink: 0; min-width: 72px; color: var(--multica-muted); font-size: 12px; line-height: 16px; }
+        flex-direction: column;
+        gap: 4px;
     }
+    &__issueHeader { display: flex; min-width: 0; align-items: baseline; gap: 12px; }
+    &__issueTitle { min-width: 0; overflow: hidden; color: var(--multica-ink); font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+    &__issueIdentifier { flex-shrink: 0; color: var(--multica-muted); font-size: 12px; line-height: 16px; }
+    &__issueBody { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 2px; }
+    &__issueDescription {
+        display: -webkit-box;
+        overflow: hidden;
+        width: 100%;
+        margin: 0;
+        color: var(--multica-muted);
+        font-size: 12px;
+        line-height: 18px;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        &--expanded { display: block; }
+    }
+    &__issueBody > button { padding: 0; border: 0; background: transparent; color: var(--multica-accent); font-size: 11px; line-height: 16px; }
     &__status {
         display: inline-flex;
         align-items: center;
@@ -260,8 +327,10 @@ button, a {
         font-size: 12px;
         white-space: nowrap;
         i { display: none; }
-        &--in_review, &--in_progress { color: var(--multica-violet-ink); }
-        &--todo, &--open { color: var(--multica-accent); }
+        &--in_review { color: #7a5800; }
+        &--in_progress { color: var(--multica-violet-ink); }
+        &--todo, &--open { color: #1d63a6; }
+        &--done { color: #237a4b; }
     }
     &__state {
         display: flex;
@@ -294,7 +363,7 @@ button, a {
 @media (min-width: 521px) and (max-width: 1000px) {
     .AiCrewConsole { grid-template-columns: 265px minmax(0, 1fr); }
     .AiCrewConsole__heading > span { display: none; }
-    .AiCrewConsole__rowMain { flex-direction: column; gap: 2px; .AiCrewConsole__issueTitle { order: 0; max-width: 100%; } }
+    .AiCrewConsole__issueHeader { flex-direction: column; gap: 2px; }
 }
 @media (max-width: 520px) {
     .AiCrewConsole {
@@ -307,7 +376,7 @@ button, a {
         &__heading > span { display: none; }
         &__row { padding: 10px 16px; gap: 8px; grid-template-columns: 12px minmax(0, 1fr) 64px; }
         &__listHeading { padding: 0 16px 0 36px; span:last-child { width: 64px; } }
-        &__rowMain { flex-direction: column; gap: 2px; .AiCrewConsole__issueTitle { order: 0; max-width: 100%; } }
+        &__issueHeader { flex-direction: column; gap: 2px; }
     }
 }
 @keyframes multica-pulse { 50% { opacity: 0.45; } }

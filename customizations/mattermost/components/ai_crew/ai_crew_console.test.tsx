@@ -1,10 +1,11 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import React from 'react';
 
 import AiCrewConsole from './ai_crew_console';
+import crewStyles from './ai_crew_styles';
 
 const responses: Record<string, unknown> = {
     '/api/ai-crew/workspaces': {
@@ -273,15 +274,33 @@ describe('AiCrewConsole', () => {
         expect(screen.queryByText('Synapse 智能体')).not.toBeInTheDocument();
     });
 
-    it('opens the capability operations view for the selected workspace', async () => {
+    it('opens capability operations from the settings menu at the end of the workspace rail', async () => {
         render(<AiCrewConsole/>);
 
         await screen.findByText('统一应用审计');
-        fireEvent.click(screen.getByRole('button', {name: '显示班组操作'}));
+        const workspaceRail = screen.getByRole('navigation', {name: '小组'});
+        const settings = within(workspaceRail).getByRole('button', {name: '设置'});
+        expect(settings.parentElement).toBe(workspaceRail.lastElementChild);
+        expect(screen.queryByRole('button', {name: '显示班组操作'})).not.toBeInTheDocument();
+        fireEvent.click(settings);
+        expect(settings).toHaveAttribute('aria-expanded', 'true');
+        fireEvent.click(screen.getByRole('menuitem', {name: '班组操作'}));
 
         expect(screen.getByRole('heading', {name: '班组操作', level: 1})).toBeInTheDocument();
         expect(screen.getByText('当前工作区：synapse-os')).toBeInTheDocument();
         expect(screen.getByRole('region', {name: '班组操作'})).toBeInTheDocument();
+        expect(settings).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('closes the settings menu with Escape', async () => {
+        render(<AiCrewConsole/>);
+        await screen.findByText('统一应用审计');
+        const settings = screen.getByRole('button', {name: '设置'});
+        fireEvent.click(settings);
+        expect(screen.getByRole('menuitem', {name: '班组操作'})).toBeInTheDocument();
+        fireEvent.keyDown(settings, {key: 'Escape'});
+        expect(screen.queryByRole('menuitem', {name: '班组操作'})).not.toBeInTheDocument();
+        expect(settings).toHaveFocus();
     });
 
     it('keeps agents from the currently selected workspace when older requests finish last', async () => {
@@ -431,6 +450,43 @@ describe('AiCrewConsole', () => {
         expect(screen.getByText('待处理')).toBeInTheDocument();
         expect(screen.getByText('审核中')).toBeInTheDocument();
         expect(screen.getByText('已完成')).toBeInTheDocument();
+    });
+
+    it('separates issue titles from content and expands long descriptions', async () => {
+        const scrollHeight = jest.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
+            return this.textContent?.includes('第二段是完整工单说明') ? 54 : 18;
+        });
+        const clientHeight = jest.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(36);
+        global.fetch = jest.fn(async (input) => ({
+            ok: true,
+            json: async () => String(input).includes('/issues?') ? {issues: [
+                {id: 'with-content', title: '独立标题', description: '第一段内容。\n第二段是完整工单说明。\n第三段继续。', status: 'todo', identifier: 'SYNA-42'},
+                {id: 'short-content', title: '短内容工单', description: '短内容。', status: 'todo', identifier: 'SYNA-44'},
+                {id: 'without-content', title: '无内容工单', description: '', status: 'done', identifier: 'SYNA-43'},
+            ]} : responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+        const title = await screen.findByText('独立标题');
+        expect(title.tagName).toBe('STRONG');
+        expect(screen.getByText(/第一段内容。/).textContent).toBe('第一段内容。\n第二段是完整工单说明。\n第三段继续。');
+        const expand = screen.getByRole('button', {name: '展开 SYNA-42 内容'});
+        expect(expand).toHaveAttribute('aria-expanded', 'false');
+        fireEvent.click(expand);
+        expect(expand).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByRole('button', {name: '收起 SYNA-42 内容'})).toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: /SYNA-44 内容/})).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: /SYNA-43 内容/})).not.toBeInTheDocument();
+        scrollHeight.mockRestore();
+        clientHeight.mockRestore();
+    });
+
+    it('compiles distinct green, blue, and yellow issue status colors', () => {
+        expect(crewStyles).toMatch(/\.AiCrewConsole__status--done[^{}]*\{[^{}]*color:\s*#237a4b/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__status--todo[^{}]*\{[^{}]*color:\s*#1d63a6/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__status--in_review[^{}]*\{[^{}]*color:\s*#7a5800/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__issueIcon--done[^{}]*\{[^{}]*background:\s*#49b97a/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__issueIcon--todo[^{}]*\{[^{}]*background:\s*#79b8f3/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__issueIcon--in_review[^{}]*\{[^{}]*background:\s*#ffd35a/);
     });
 
     it('does not match missing project IDs to unrelated or unassigned issues', async () => {
