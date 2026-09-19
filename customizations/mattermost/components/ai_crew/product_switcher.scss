@@ -1,0 +1,50 @@
+.CrewProductSwitcher {
+    position: relative;
+    font: 14px/20px 'Open Sans', sans-serif;
+
+    &__trigger {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 6px 3px 5px;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--crew-switcher-trigger, var(--sidebar-text));
+        font: inherit;
+        cursor: pointer;
+
+        strong { font: 600 16px/20px Metropolis, sans-serif; }
+        &:hover, &[aria-expanded='true'] { background: var(--crew-switcher-hover, rgba(var(--sidebar-text-rgb), 0.12)); }
+    }
+
+    &__menu {
+        position: absolute;
+        z-index: 200;
+        top: calc(100% + 8px);
+        left: 0;
+        width: 270px;
+        max-width: calc(100vw - 24px);
+        padding: 8px 0;
+        border: 1px solid var(--crew-switcher-border, rgba(var(--center-channel-color-rgb), 0.16));
+        border-radius: 4px;
+        background: var(--crew-switcher-bg, var(--center-channel-bg));
+        color: var(--crew-switcher-ink, var(--center-channel-color));
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+
+        a {
+            display: flex;
+            height: 40px;
+            align-items: center;
+            gap: 8px;
+            padding: 0 20px 0 16px;
+            color: inherit;
+            text-decoration: none;
+            font-weight: 600;
+
+            svg { color: var(--crew-switcher-icon, var(--button-bg)); }
+            &:hover, &:focus-visible { background: var(--crew-switcher-hover, rgba(var(--center-channel-color-rgb), 0.08)); color: inherit; }
+            &[aria-current='page'] { background: var(--crew-switcher-current, rgba(var(--button-bg-rgb), 0.12)); }
+        }
+    }
+}

@@ -1,1 +1,1 @@
-export {default} from './ai_crew_console';
+export {default} from './ai_crew_page';

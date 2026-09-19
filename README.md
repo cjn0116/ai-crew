@@ -25,6 +25,10 @@ Apple Silicon environments; it does not alter runtime image delivery.
 
 ## Run
 
+On macOS, double-click `start.command` in Finder to start the service
+after completing Setup. Keep the Terminal window open while using the app;
+press Control+C to stop it. Startup errors remain visible in the window.
+
 ```bash
 npm start
 ```
