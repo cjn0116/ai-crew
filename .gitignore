@@ -1,12 +1,39 @@
+# OS and editor temporary files
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Local environments and credentials (keep the documented template)
 .venv/
+venv/
 .env
 .env.*
 !.env.example
+.runtime/
+credentials_cache.json
+/credentials/
+
+# Dependencies and generated build output
 node_modules/
 dist/
+*.tsbuildinfo
+
+# Tests, browser runs, and caches
 coverage/
+.nyc_output/
+playwright-report/
+test-results/
 .cache/
 .turbo/
-*.log
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
+# Local logs, process state, and scratch files
+*.log
+*.pid
+*.pid.lock
+/tmp/
+/temp/

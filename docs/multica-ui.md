@@ -23,10 +23,11 @@ they do not change the document's Mattermost theme variables.
 - Titles and workspace initials: Metropolis; content titles are 16px / 20px, weight 600.
 - Use the font assets already loaded by the Mattermost application. Standalone
   previews must load those same assets; naming the font without loading it is insufficient.
-- Desktop: 44px product bar, 65px workspace rail, 264px project navigation,
+- Desktop: 44px product bar, 65px workspace rail, 264px project navigation allocation (including a 6px gutter),
   55px sidebar heading, 56px content header, 12px content panel corners.
 - Navigation rows: 32px, regular-weight labels, subtle active background and a
-  narrow leading indicator. Bold labels do not imply unread content here.
+  narrow leading indicator. Navigation items use 6px corners, and the project
+  panel uses 12px corners on all four sides. Bold labels do not imply unread content here.
 - Issue rows keep identifiers, titles and status aligned. Status has a label as
   well as a colored indicator. Avoid oversized cards, pills and repeated bold titles.
 - Below 1000px the navigation narrows; below 521px it stacks above the content.
