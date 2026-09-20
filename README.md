@@ -47,8 +47,12 @@ npm start
 ```
 
 On macOS, after completing setup, double-click **`start.command`** in Finder.
-It starts the service in Terminal and keeps startup errors visible. Keep that
-window open while using the app; press **Control+C** to stop the service.
+It rebuilds the Mattermost and Multica browser assets from the current source
+before starting the service in Terminal. A failed build stops the launch so an
+older page is not served by a new process. Keep that window open while using the
+app; press **Control+C** to stop the service. Close an older service window
+before launching again on the same port, then reload the browser tab. The
+launcher reports the process ID immediately if that port is already occupied.
 
 - Multica: <http://127.0.0.1:4174/ai-crew>
 - Mattermost: <http://127.0.0.1:4174/>
