@@ -1,10 +1,11 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import React from 'react';
 
 import AiCrewConsole from './ai_crew_console';
+import crewStyles from './ai_crew_styles';
 
 const responses: Record<string, unknown> = {
     '/api/ai-crew/workspaces': {
@@ -40,6 +41,8 @@ describe('AiCrewConsole', () => {
         })) as jest.Mock;
     });
 
+    afterEach(() => jest.useRealTimers());
+
     it('announces loading and exposes an empty-state explanation', async () => {
         let resolveWorkspaces: (value: unknown) => void = () => {};
         global.fetch = jest.fn(() => new Promise((resolve) => { resolveWorkspaces = resolve; })) as jest.Mock;
@@ -59,6 +62,10 @@ describe('AiCrewConsole', () => {
 
         expect(await screen.findByText('统一应用审计')).toBeInTheDocument();
         expect(screen.getByText('优化移动端导航')).toBeInTheDocument();
+        const projectLabel = screen.getByText('项目', {selector: '.AiCrewConsole__projectLabel span'}).parentElement;
+        expect(projectLabel).toHaveTextContent('项目');
+        expect(projectLabel?.querySelector('small')).toBeNull();
+        expect(screen.getByRole('button', {name: '筛选项目：应用治理'}).querySelector('small')).toHaveTextContent('1');
 
         fireEvent.click(screen.getByRole('button', {name: '筛选项目：应用治理'}));
         expect(screen.getByText('统一应用审计')).toBeInTheDocument();
@@ -66,6 +73,371 @@ describe('AiCrewConsole', () => {
 
         fireEvent.click(screen.getByRole('button', {name: '显示全部工单'}));
         expect(screen.getByText('优化移动端导航')).toBeInTheDocument();
+    });
+
+    it('refreshes the selected workspace and shows the newest issue without a page reload', async () => {
+        let currentIssues = responses['/api/ai-crew/issues?workspace=synapse-os'];
+        global.fetch = jest.fn(async (input) => ({
+            ok: true,
+            json: async () => String(input).includes('/issues?') ? currentIssues : responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+        expect(await screen.findByText('统一应用审计')).toBeInTheDocument();
+
+        currentIssues = {issues: [{id: 'new', title: '刚更新的工单', status: 'todo', identifier: 'SYNA-99'}]};
+        fireEvent.click(screen.getByRole('button', {name: '刷新当前小组'}));
+
+        expect(await screen.findByText('刚更新的工单')).toBeInTheDocument();
+        expect(screen.queryByText('统一应用审计')).not.toBeInTheDocument();
+        expect(screen.getByText('SYNA-99')).toBeInTheDocument();
+        expect(screen.getByText(/上次更新/)).toBeInTheDocument();
+    });
+
+    it('refreshes when the page becomes visible and preserves the current project filter', async () => {
+        let currentIssues = responses['/api/ai-crew/issues?workspace=synapse-os'];
+        global.fetch = jest.fn(async (input) => ({
+            ok: true,
+            json: async () => String(input).includes('/issues?') ? currentIssues : responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+        fireEvent.click(await screen.findByRole('button', {name: '筛选项目：应用治理'}));
+
+        currentIssues = {issues: [{id: 'new', title: '项目新工单', project: {title: '应用治理'}}]};
+        fireEvent(window, new Event('focus'));
+
+        expect(await screen.findByText('项目新工单')).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '筛选项目：应用治理'})).toHaveAttribute('aria-current', 'page');
+    });
+
+    it('polls the active workspace while the page remains open', async () => {
+        jest.useFakeTimers();
+        let currentIssues = responses['/api/ai-crew/issues?workspace=synapse-os'];
+        global.fetch = jest.fn(async (input) => ({
+            ok: true,
+            json: async () => String(input).includes('/issues?') ? currentIssues : responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+        await act(async () => { await Promise.resolve(); });
+        expect(screen.getByText('统一应用审计')).toBeInTheDocument();
+
+        currentIssues = {issues: [{id: 'fresh', title: '定时同步的工单', status: 'todo'}]};
+        await act(async () => {
+            jest.advanceTimersByTime(60_000);
+        });
+
+        expect(screen.getByText('定时同步的工单')).toBeInTheDocument();
+    });
+
+    it('allows refresh in the new workspace after an earlier refresh remains pending', async () => {
+        render(<AiCrewConsole/>);
+        await screen.findByText('统一应用审计');
+        global.fetch = jest.fn((input) => String(input).includes('synapse-os') ? new Promise(() => {}) : Promise.resolve({
+            ok: true,
+            json: async () => responses[String(input)],
+        })) as jest.Mock;
+
+        fireEvent.click(screen.getByRole('button', {name: '刷新当前小组'}));
+        fireEvent.click(screen.getByRole('button', {name: '切换到小组：风机研发'}));
+
+        expect(await screen.findByText('校核叶片载荷')).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '刷新当前小组'})).toBeEnabled();
+    });
+
+    it('finishes foreground loading when a focus refresh supersedes it', async () => {
+        const projectResolvers: Array<(value: unknown) => void> = [];
+        const issueResolvers: Array<(value: unknown) => void> = [];
+        global.fetch = jest.fn((input) => {
+            const url = String(input);
+            if (url === '/api/ai-crew/workspaces') {
+                return Promise.resolve({ok: true, json: async () => responses[url]});
+            }
+            if (url.includes('/projects?workspace=synapse-os')) {
+                return new Promise((resolve) => projectResolvers.push((data) => resolve({ok: true, json: async () => data})));
+            }
+            if (url.includes('/issues?workspace=synapse-os')) {
+                return new Promise((resolve) => issueResolvers.push((data) => resolve({ok: true, json: async () => data})));
+            }
+            return Promise.resolve({ok: true, json: async () => responses[url]});
+        }) as jest.Mock;
+        render(<AiCrewConsole/>);
+        await waitFor(() => expect(projectResolvers).toHaveLength(1));
+
+        fireEvent(window, new Event('focus'));
+        await waitFor(() => expect(projectResolvers).toHaveLength(2));
+        await act(async () => {
+            projectResolvers[1]({projects: [{id: 'fresh', title: '最新项目'}]});
+            issueResolvers[1]({issues: [{id: 'fresh', title: '焦点刷新工单', project_id: 'fresh'}]});
+        });
+
+        expect(await screen.findByText('焦点刷新工单')).toBeInTheDocument();
+        expect(screen.getByLabelText('工单内容')).toHaveAttribute('aria-busy', 'false');
+    });
+
+    it('keeps the last good issue list visible when refresh fails', async () => {
+        let failIssues = false;
+        global.fetch = jest.fn(async (input) => ({
+            ok: !(failIssues && String(input).includes('/issues?')),
+            status: 502,
+            json: async () => responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+        expect(await screen.findByText('统一应用审计')).toBeInTheDocument();
+
+        failIssues = true;
+        fireEvent.click(screen.getByRole('button', {name: '刷新当前小组'}));
+
+        expect(await screen.findByText(/显示上次成功获取的数据/)).toBeInTheDocument();
+        expect(screen.getByText('统一应用审计')).toBeInTheDocument();
+    });
+
+    it('lists agents for the selected workspace', async () => {
+        global.fetch = jest.fn(async (input) => ({
+            ok: true,
+            json: async () => String(input).includes('/commands/agents?') ? {
+                ok: true,
+                command: 'agents',
+                data: {ok: true, workspace: 'synapse-os', data: [{id: 'a1', name: '巡检助手', status: 'active'}]},
+            } : responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+        await screen.findByText('统一应用审计');
+        fireEvent.click(screen.getByRole('button', {name: '显示智能体'}));
+
+        expect(await screen.findByText('巡检助手')).toBeInTheDocument();
+        expect(global.fetch).toHaveBeenCalledWith('/api/ai-crew/commands/agents?workspace=synapse-os', expect.anything());
+    });
+
+    it('finishes the first agents load when a focus refresh supersedes it', async () => {
+        const agentResolvers: Array<(value: unknown) => void> = [];
+        global.fetch = jest.fn((input) => {
+            const url = String(input);
+            if (url.includes('/commands/agents?')) {
+                return new Promise((resolve) => agentResolvers.push((data) => resolve({ok: true, json: async () => data})));
+            }
+            return Promise.resolve({ok: true, json: async () => responses[url]});
+        }) as jest.Mock;
+        render(<AiCrewConsole/>);
+        await screen.findByText('统一应用审计');
+        fireEvent.click(screen.getByRole('button', {name: '显示智能体'}));
+        await waitFor(() => expect(agentResolvers).toHaveLength(1));
+
+        fireEvent(window, new Event('focus'));
+        await waitFor(() => expect(agentResolvers).toHaveLength(2));
+        await act(async () => {
+            agentResolvers[1]({data: {data: [{id: 'fresh', name: '焦点刷新智能体'}]}});
+        });
+
+        expect(await screen.findByText('焦点刷新智能体')).toBeInTheDocument();
+        expect(screen.getByLabelText('工单内容')).toHaveAttribute('aria-busy', 'false');
+    });
+
+    it('does not show agents from the previous workspace when the new workspace agent request fails', async () => {
+        global.fetch = jest.fn(async (input) => {
+            const url = String(input);
+            if (url.includes('/commands/agents?workspace=wind-rd')) {
+                return {ok: false, status: 502, json: async () => ({})};
+            }
+            if (url.includes('/commands/agents?')) {
+                return {ok: true, json: async () => ({data: {data: [{id: 'a1', name: 'Synapse 智能体'}]}})};
+            }
+            return {ok: true, json: async () => responses[url]};
+        }) as jest.Mock;
+        render(<AiCrewConsole/>);
+        await screen.findByText('统一应用审计');
+        fireEvent.click(screen.getByRole('button', {name: '显示智能体'}));
+        expect(await screen.findByText('Synapse 智能体')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', {name: '切换到小组：风机研发'}));
+
+        expect(await screen.findByRole('alert')).toHaveTextContent('智能体载入失败');
+        expect(screen.queryByText('Synapse 智能体')).not.toBeInTheDocument();
+    });
+
+    it('clears agents when switching workspaces outside the agents view before a later agent request fails', async () => {
+        global.fetch = jest.fn(async (input) => {
+            const url = String(input);
+            if (url.includes('/commands/agents?workspace=wind-rd')) {
+                return {ok: false, status: 502, json: async () => ({})};
+            }
+            if (url.includes('/commands/agents?')) {
+                return {ok: true, json: async () => ({data: {data: [{id: 'a1', name: 'Synapse 智能体'}]}})};
+            }
+            return {ok: true, json: async () => responses[url]};
+        }) as jest.Mock;
+        render(<AiCrewConsole/>);
+        await screen.findByText('统一应用审计');
+        fireEvent.click(screen.getByRole('button', {name: '显示智能体'}));
+        expect(await screen.findByText('Synapse 智能体')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', {name: '显示全部工单'}));
+        fireEvent.click(screen.getByRole('button', {name: '切换到小组：风机研发'}));
+        expect(await screen.findByText('校核叶片载荷')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', {name: '显示智能体'}));
+
+        expect(await screen.findByRole('alert')).toHaveTextContent('智能体载入失败');
+        expect(screen.queryByText('Synapse 智能体')).not.toBeInTheDocument();
+    });
+
+    it('opens capability operations from the settings menu at the end of the workspace rail', async () => {
+        render(<AiCrewConsole/>);
+
+        await screen.findByText('统一应用审计');
+        const workspaceRail = screen.getByRole('navigation', {name: '小组'});
+        const settings = within(workspaceRail).getByRole('button', {name: '设置'});
+        expect(settings.parentElement).toBe(workspaceRail.lastElementChild);
+        expect(screen.queryByRole('button', {name: '显示班组操作'})).not.toBeInTheDocument();
+        fireEvent.click(settings);
+        expect(settings).toHaveAttribute('aria-expanded', 'true');
+        fireEvent.click(screen.getByRole('menuitem', {name: '班组操作'}));
+
+        expect(screen.getByRole('heading', {name: '班组操作', level: 1})).toBeInTheDocument();
+        expect(screen.getByText('当前工作区：synapse-os')).toBeInTheDocument();
+        expect(screen.getByRole('region', {name: '班组操作'})).toBeInTheDocument();
+        expect(settings).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('closes the settings menu with Escape', async () => {
+        render(<AiCrewConsole/>);
+        await screen.findByText('统一应用审计');
+        const settings = screen.getByRole('button', {name: '设置'});
+        fireEvent.click(settings);
+        expect(screen.getByRole('menuitem', {name: '班组操作'})).toBeInTheDocument();
+        fireEvent.keyDown(settings, {key: 'Escape'});
+        expect(screen.queryByRole('menuitem', {name: '班组操作'})).not.toBeInTheDocument();
+        expect(settings).toHaveFocus();
+    });
+
+    it('keeps agents from the currently selected workspace when older requests finish last', async () => {
+        const pending = new Map<string, (value: unknown) => void>();
+        global.fetch = jest.fn((input) => {
+            const url = String(input);
+            if (url.includes('/commands/agents?')) {
+                return new Promise((resolve) => pending.set(url, (value) => resolve({ok: true, json: async () => value})));
+            }
+            return Promise.resolve({ok: true, json: async () => responses[url]});
+        }) as jest.Mock;
+        render(<AiCrewConsole/>);
+        await screen.findByText('统一应用审计');
+        fireEvent.click(screen.getByRole('button', {name: '显示智能体'}));
+        fireEvent.click(screen.getByRole('button', {name: '切换到小组：风机研发'}));
+        expect(pending.has('/api/ai-crew/commands/agents?workspace=wind-rd')).toBe(true);
+
+        await act(async () => {
+            pending.get('/api/ai-crew/commands/agents?workspace=wind-rd')?.({data: {data: [{id: 'new', name: '新小组智能体'}]}});
+        });
+        expect(await screen.findByText('新小组智能体')).toBeInTheDocument();
+        await act(async () => {
+            pending.get('/api/ai-crew/commands/agents?workspace=synapse-os')?.({data: {data: [{id: 'old', name: '旧小组智能体'}]}});
+        });
+        expect(screen.getByText('新小组智能体')).toBeInTheDocument();
+        expect(screen.queryByText('旧小组智能体')).not.toBeInTheDocument();
+    });
+
+    it('creates an issue and reloads the current workspace', async () => {
+        let latestIssues = responses['/api/ai-crew/issues?workspace=synapse-os'];
+        const requestBodies: unknown[] = [];
+        global.fetch = jest.fn(async (input, options) => {
+            if (String(input) === '/api/ai-crew/commands/issue-new') {
+                requestBodies.push(JSON.parse(String(options?.body)));
+                latestIssues = {issues: [{id: 'new', title: '验证工单同步', status: 'todo', identifier: 'SYNA-99'}]};
+                return {ok: true, json: async () => ({ok: true, command: 'issue-new', data: {ok: true}})};
+            }
+            return {ok: true, json: async () => String(input).includes('/issues?') ? latestIssues : responses[String(input)]};
+        }) as jest.Mock;
+        render(<AiCrewConsole/>);
+        fireEvent.click(await screen.findByRole('button', {name: '新建工单'}));
+        fireEvent.change(screen.getByRole('textbox', {name: '工单标题'}), {target: {value: '验证工单同步'}});
+        fireEvent.click(screen.getByRole('button', {name: '创建工单'}));
+
+        expect(await screen.findByText('验证工单同步')).toBeInTheDocument();
+        expect(requestBodies).toEqual([{title: '验证工单同步', workspace: 'synapse-os'}]);
+    });
+
+    it('does not reload an old workspace after issue creation finishes following a workspace switch', async () => {
+        let resolveCreate: (value: unknown) => void = () => {};
+        global.fetch = jest.fn((input) => {
+            const url = String(input);
+            if (url === '/api/ai-crew/commands/issue-new') {
+                return new Promise((resolve) => { resolveCreate = (data) => resolve({ok: true, json: async () => data}); });
+            }
+            return Promise.resolve({ok: true, json: async () => responses[url]});
+        }) as jest.Mock;
+        render(<AiCrewConsole/>);
+        fireEvent.click(await screen.findByRole('button', {name: '新建工单'}));
+        fireEvent.change(screen.getByRole('textbox', {name: '工单标题'}), {target: {value: '只属于 Synapse 的工单'}});
+        fireEvent.click(screen.getByRole('button', {name: '创建工单'}));
+        fireEvent.click(screen.getByRole('button', {name: '切换到小组：风机研发'}));
+        expect(await screen.findByText('校核叶片载荷')).toBeInTheDocument();
+
+        await act(async () => { resolveCreate({ok: true, data: {ok: true}}); });
+
+        await waitFor(() => expect(screen.getByText('校核叶片载荷')).toBeInTheDocument());
+        expect(screen.queryByText('统一应用审计')).not.toBeInTheDocument();
+        expect((global.fetch as jest.Mock).mock.calls.filter(([url]) => String(url) === '/api/ai-crew/projects?workspace=synapse-os')).toHaveLength(1);
+    });
+
+    it('resets the issue project selection when changing workspaces', async () => {
+        const requestBodies: unknown[] = [];
+        global.fetch = jest.fn(async (input, options) => {
+            if (String(input) === '/api/ai-crew/commands/issue-new') {
+                requestBodies.push(JSON.parse(String(options?.body)));
+                return {ok: true, json: async () => ({ok: true})};
+            }
+            return {ok: true, json: async () => responses[String(input)]};
+        }) as jest.Mock;
+        render(<AiCrewConsole/>);
+        fireEvent.click(await screen.findByRole('button', {name: '新建工单'}));
+        fireEvent.change(screen.getByRole('combobox', {name: '项目'}), {target: {value: 'p1'}});
+        fireEvent.click(screen.getByRole('button', {name: '切换到小组：风机研发'}));
+
+        expect(await screen.findByText('校核叶片载荷')).toBeInTheDocument();
+        expect(screen.getByRole('combobox', {name: '项目'})).toHaveValue('');
+        fireEvent.change(screen.getByRole('textbox', {name: '工单标题'}), {target: {value: '新小组工单'}});
+        fireEvent.click(screen.getByRole('button', {name: '创建工单'}));
+        await waitFor(() => expect(requestBodies).toEqual([{title: '新小组工单', workspace: 'wind-rd'}]));
+    });
+
+    it('refreshes the agents view through focus, manual refresh, and the interval', async () => {
+        jest.useFakeTimers();
+        let agentName = '初始智能体';
+        global.fetch = jest.fn(async (input) => ({
+            ok: true,
+            json: async () => String(input).includes('/commands/agents?') ? {ok: true, command: 'agents', data: {ok: true, workspace: 'synapse-os', data: [{id: agentName, name: agentName}]}} : responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+        await screen.findByText('统一应用审计');
+        fireEvent.click(await screen.findByRole('button', {name: '显示智能体'}));
+        expect(await screen.findByText('初始智能体')).toBeInTheDocument();
+
+        agentName = '焦点智能体';
+        fireEvent(window, new Event('focus'));
+        expect(await screen.findByText('焦点智能体')).toBeInTheDocument();
+
+        agentName = '手动智能体';
+        fireEvent.click(screen.getByRole('button', {name: '刷新当前小组'}));
+        expect(await screen.findByText('手动智能体')).toBeInTheDocument();
+
+        agentName = '定时智能体';
+        await act(async () => { jest.advanceTimersByTime(60_000); });
+        expect(screen.getByText('定时智能体')).toBeInTheDocument();
+    });
+
+    it('keeps the agent list visible with a stale state when a refresh fails', async () => {
+        let failAgents = false;
+        global.fetch = jest.fn(async (input) => ({
+            ok: !(failAgents && String(input).includes('/commands/agents?')),
+            json: async () => String(input).includes('/commands/agents?') ? {ok: true, command: 'agents', data: {ok: true, workspace: 'synapse-os', data: [{id: 'a1', name: '巡检助手'}]}} : responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+        await screen.findByText('统一应用审计');
+        fireEvent.click(await screen.findByRole('button', {name: '显示智能体'}));
+        expect(await screen.findByText('巡检助手')).toBeInTheDocument();
+
+        failAgents = true;
+        fireEvent.click(screen.getByRole('button', {name: '刷新当前小组'}));
+
+        expect(await screen.findByText('刷新失败，显示上次成功获取的数据。')).toBeInTheDocument();
+        expect(screen.getByText('巡检助手')).toBeInTheDocument();
     });
 
     it('labels the status values used by live Multica issues', async () => {
@@ -82,6 +454,43 @@ describe('AiCrewConsole', () => {
         expect(screen.getByText('待处理')).toBeInTheDocument();
         expect(screen.getByText('审核中')).toBeInTheDocument();
         expect(screen.getByText('已完成')).toBeInTheDocument();
+    });
+
+    it('separates issue titles from content and expands long descriptions', async () => {
+        const scrollHeight = jest.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
+            return this.textContent?.includes('第二段是完整工单说明') ? 54 : 18;
+        });
+        const clientHeight = jest.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(36);
+        global.fetch = jest.fn(async (input) => ({
+            ok: true,
+            json: async () => String(input).includes('/issues?') ? {issues: [
+                {id: 'with-content', title: '独立标题', description: '第一段内容。\n第二段是完整工单说明。\n第三段继续。', status: 'todo', identifier: 'SYNA-42'},
+                {id: 'short-content', title: '短内容工单', description: '短内容。', status: 'todo', identifier: 'SYNA-44'},
+                {id: 'without-content', title: '无内容工单', description: '', status: 'done', identifier: 'SYNA-43'},
+            ]} : responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+        const title = await screen.findByText('独立标题');
+        expect(title.tagName).toBe('STRONG');
+        expect(screen.getByText(/第一段内容。/).textContent).toBe('第一段内容。\n第二段是完整工单说明。\n第三段继续。');
+        const expand = screen.getByRole('button', {name: '展开 SYNA-42 内容'});
+        expect(expand).toHaveAttribute('aria-expanded', 'false');
+        fireEvent.click(expand);
+        expect(expand).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByRole('button', {name: '收起 SYNA-42 内容'})).toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: /SYNA-44 内容/})).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: /SYNA-43 内容/})).not.toBeInTheDocument();
+        scrollHeight.mockRestore();
+        clientHeight.mockRestore();
+    });
+
+    it('compiles distinct green, blue, and yellow issue status colors', () => {
+        expect(crewStyles).toMatch(/\.AiCrewConsole__status--done[^{}]*\{[^{}]*color:\s*#237a4b/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__status--todo[^{}]*\{[^{}]*color:\s*#1d63a6/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__status--in_review[^{}]*\{[^{}]*color:\s*#7a5800/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__issueIcon--done[^{}]*\{[^{}]*background:\s*#49b97a/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__issueIcon--todo[^{}]*\{[^{}]*background:\s*#79b8f3/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__issueIcon--in_review[^{}]*\{[^{}]*background:\s*#ffd35a/);
     });
 
     it('does not match missing project IDs to unrelated or unassigned issues', async () => {

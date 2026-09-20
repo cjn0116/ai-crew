@@ -1,4 +1,12 @@
-const secretKeys = new Set(['authorization', 'password', 'token', 'access_token', 'refresh_token']);
+const secretKeyPart = /(authorization|password|secret|ticket|token)/i;
+const credentialKey = /^credentials?$/i;
+const ticketValue = /(?:fh_u_|Bearer\s+)[A-Za-z0-9._-]+/gi;
+
+function isConnectionDiagnostic(key: string, value: unknown): boolean {
+  return key === 'credential_status' || (
+    typeof value === 'boolean' && /^(?:mm|multica)_token$/.test(key)
+  );
+}
 
 export function redactSecrets(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -8,9 +16,11 @@ export function redactSecrets(value: unknown): unknown {
     return Object.fromEntries(
       Object.entries(value).map(([key, child]) => [
         key,
-        secretKeys.has(key.toLowerCase()) ? '[REDACTED]' : redactSecrets(child),
+        secretKeyPart.test(key) || credentialKey.test(key)
+          ? isConnectionDiagnostic(key, child) ? child : '[REDACTED]'
+          : redactSecrets(child),
       ]),
     );
   }
-  return value;
+  return typeof value === 'string' ? value.replace(ticketValue, '[REDACTED]') : value;
 }
