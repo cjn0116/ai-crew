@@ -103,7 +103,7 @@ npm run build
 # Apply overlays before running the focused frontend tests
 npm run customize:mattermost
 npm test --prefix upstream/mattermost/webapp/channels -- --runInBand \
-  --reporters=default ai_crew_console.test.tsx crew_operations.test.tsx \
+  ai_crew_console.test.tsx crew_operations.test.tsx \
   ai_crew_page.test.tsx product_switcher.test.tsx \
   global_header/left_controls/product_menu/product_menu.test.tsx
 
