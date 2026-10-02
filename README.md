@@ -9,7 +9,7 @@ Glacier palette, while its route and Shadow DOM keep the two interfaces isolated
 
 - Git with submodule support
 - Node.js 22.18+ (22 LTS recommended) and npm 10
-- Python 3 and an installed, authenticated `ai-crew` skill
+- Python 3.14 and an installed, authenticated `ai-crew` skill
 - Network access to the ai-crew gateway used by the credential cache
 
 The BFF runs TypeScript directly in Node, so older Node.js 22 releases without
@@ -26,13 +26,14 @@ cd ai-crew
 # Also works when the repository was cloned without --recurse-submodules.
 git submodule update --init upstream/mattermost
 
-python3 -m venv .venv
+python3.14 -m venv .venv
 npm ci
 npm ci --prefix upstream/mattermost/webapp
 npm run build:mattermost
 ```
 
-`build:mattermost` applies the customization overlay and builds the frontend.
+`build:mattermost` applies the customization overlay, corrects the upstream sidebar
+Sass declaration order, and builds the frontend.
 Both dependency installations are required: the root installs the BFF dependencies,
 while the submodule installs Mattermost's frontend packages, Sass and test tools.
 
@@ -53,6 +54,9 @@ older page is not served by a new process. Keep that window open while using the
 app; press **Control+C** to stop the service. Close an older service window
 before launching again on the same port, then reload the browser tab. The
 launcher reports the process ID immediately if that port is already occupied.
+The launcher requires this project's `.venv` to use Python 3.14 and passes its
+interpreter to the BFF. It also checks that the configured ai-crew CLI exists
+before rebuilding the frontend.
 
 - Multica: <http://127.0.0.1:4174/ai-crew>
 - Mattermost: <http://127.0.0.1:4174/>
@@ -150,10 +154,17 @@ for additional context.
   or select another port with `AI_CREW_BFF_PORT`.
 - **Missing Node/npm or dependencies:** complete the requirements and both `npm ci`
   steps before using the launcher.
-- **Missing `.venv/bin/python`:** create the virtual environment or set
-  `AI_CREW_PYTHON` to an existing Python 3 executable.
+- **Missing or older `.venv/bin/python`:** run
+  `python3.14 -m venv --clear .venv` in this repository. `npm start` can use
+  `AI_CREW_PYTHON` to select another interpreter; `start.command` always uses
+  this project's Python 3.14 virtual environment.
+- **Missing ai-crew CLI:** install the skill at the default path, or set
+  `AI_CREW_CLI` to the script's absolute path before running `start.command`.
 - **Multica fails to load or Mattermost authentication fails:** refresh the ai-crew
-  skill login and check the CLI/credential paths and gateway connectivity.
+  skill login and check the CLI/credential paths and gateway connectivity. The
+  Multica workspace list uses the CLI's direct `workspaces` command; diagnose it
+  with `.venv/bin/python "$HOME/.codex/skills/ai-crew/scripts/ai_crew.py" workspaces`
+  (replace the script path if `AI_CREW_CLI` is configured).
 - **UI changes are not visible:** rebuild with `npm run build:mattermost`, then reload
   the browser. Applying the overlay alone does not update the served assets.
 - **Messages or issues look unchanged:** press the Multica refresh button or

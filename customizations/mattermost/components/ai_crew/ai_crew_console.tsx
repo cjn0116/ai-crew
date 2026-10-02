@@ -35,6 +35,8 @@ type Issue = {
     };
 };
 
+type IssueStatus = {key: string; name: string; category?: string};
+
 type IssueDescriptionProps = {
     description: string;
     expanded: boolean;
@@ -95,15 +97,30 @@ async function postJson<T>(url: string, body: Record<string, string>): Promise<T
     return response.json() as Promise<T>;
 }
 
+async function putJson<T>(url: string, body: {workspace: string; status: string; confirm: true}): Promise<T> {
+    const response = await fetch(url, {
+        method: 'PUT',
+        headers: {'content-type': 'application/json', accept: 'application/json'},
+        body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+        throw new Error(`Request failed with ${response.status}`);
+    }
+    return response.json() as Promise<T>;
+}
+
 const statusLabel = (status?: string) => ({
-    in_progress: '进行中',
-    todo: '待处理',
-    in_review: '审核中',
-    done: '已完成',
-    planned: '已规划',
-    open: '待处理',
-    closed: '已关闭',
-}[status ?? ''] ?? status ?? '未设置');
+    in_progress: 'In Progress',
+    todo: 'Todo',
+    in_review: 'In Review',
+    done: 'Done',
+    planned: 'Planned',
+    open: 'Open',
+    closed: 'Closed',
+    backlog: 'Backlog',
+    blocked: 'Blocked',
+    cancelled: 'Cancelled',
+}[status ?? ''] ?? (status ? status.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ') : 'Not set'));
 
 const projectKey = (project: Project) => project.id ?? project.title;
 const issueMatchesProject = (issue: Issue, project: Project) => {
@@ -120,6 +137,9 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
     const [workspace, setWorkspace] = useState('');
     const [projects, setProjects] = useState<Project[]>([]);
     const [issues, setIssues] = useState<Issue[]>([]);
+    const [issueStatuses, setIssueStatuses] = useState<IssueStatus[]>([]);
+    const [statusSubmittingWorkspaces, setStatusSubmittingWorkspaces] = useState<string[]>([]);
+    const [statusError, setStatusError] = useState(false);
     const [selectedProject, setSelectedProject] = useState('');
     const [view, setView] = useState<'issues' | 'agents' | 'operations'>('issues');
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -144,6 +164,7 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
     const workspaceRef = useRef('');
     const settingsRef = useRef<HTMLDivElement>(null);
     const settingsButtonRef = useRef<HTMLButtonElement>(null);
+    const submittingWorkspacesRef = useRef(new Set<string>());
 
     const loadWorkspace = useCallback(async (slug: string, background = false) => {
         const request = ++requestSequence.current;
@@ -157,6 +178,15 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
             setLastUpdated(null);
             setSelectedProject('');
         }
+        void getJson<{statuses?: IssueStatus[]}>(`/api/ai-crew/issue-statuses?workspace=${encodeURIComponent(slug)}`).then((statusData) => {
+            if (request === requestSequence.current) {
+                setIssueStatuses(statusData.statuses ?? []);
+            }
+        }).catch(() => {
+            if (request === requestSequence.current) {
+                setIssueStatuses([]);
+            }
+        });
         try {
             const [projectData, issueData] = await Promise.all([
                 getJson<{projects?: Project[]}>(`/api/ai-crew/projects?workspace=${encodeURIComponent(slug)}`),
@@ -178,6 +208,7 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                     setError(true);
                     setProjects([]);
                     setIssues([]);
+                    setIssueStatuses([]);
                 }
             }
         } finally {
@@ -244,6 +275,7 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
             } else {
                 setProjects([]);
                 setIssues([]);
+                setIssueStatuses([]);
                 setLoading(false);
             }
         } catch {
@@ -306,6 +338,8 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
         setWorkspace(slug);
         setIssueProject('');
         setExpandedIssueId(null);
+        setStatusError(false);
+        setIssueStatuses([]);
         loadWorkspace(slug);
         if (view === 'agents') {
             void loadAgents(slug);
@@ -341,6 +375,33 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
         } finally {
             setIssueSubmitting(false);
         }
+    };
+
+    const updateIssueStatus = async (issue: Issue, status: string, targetWorkspace: string) => {
+        if (!issue.id || submittingWorkspacesRef.current.has(targetWorkspace) || workspaceRef.current !== targetWorkspace) {
+            return;
+        }
+        submittingWorkspacesRef.current.add(targetWorkspace);
+        setStatusSubmittingWorkspaces([...submittingWorkspacesRef.current]);
+        setStatusError(false);
+        try {
+            await putJson(`/api/ai-crew/issues/${encodeURIComponent(issue.id)}/status`, {workspace: targetWorkspace, status, confirm: true});
+            if (workspaceRef.current === targetWorkspace) {
+                await loadWorkspace(targetWorkspace, true);
+            }
+        } catch {
+            if (workspaceRef.current === targetWorkspace) {
+                setStatusError(true);
+            }
+        } finally {
+            submittingWorkspacesRef.current.delete(targetWorkspace);
+            setStatusSubmittingWorkspaces([...submittingWorkspacesRef.current]);
+        }
+    };
+
+    const statusName = (key?: string) => {
+        const catalogName = issueStatuses.find((item) => item.key === key)?.name;
+        return catalogName && /^[\x20-\x7e]+$/.test(catalogName) ? catalogName : statusLabel(key);
     };
 
     const activeWorkspace = workspaces.find((item) => item.slug === workspace);
@@ -497,6 +558,7 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                         </form>
                     )}
                     {view === 'issues' && stale && <p className='AiCrewConsole__stale' role='alert'>{'刷新失败，显示上次成功获取的数据。'}</p>}
+                    {view === 'issues' && statusError && <p className='AiCrewConsole__stale' role='alert'>{'修改工单状态失败，请重试。'}</p>}
                     {view === 'issues' && loading && (
                         <div className='AiCrewConsole__loading'>
                             <div className='AiCrewConsole__loadingLabel' role='status'>{'正在载入...'}</div>
@@ -541,10 +603,22 @@ const AiCrewConsole: React.FC<Partial<RouteComponentProps>> = () => {
                                         </div>
                                         {description && <IssueDescription description={description} expanded={expanded} issueLabel={issueLabel} onToggle={() => setExpandedIssueId(expanded ? null : issueKey)}/>}
                                     </div>
-                                    <span className={`AiCrewConsole__status AiCrewConsole__status--${issue.status ?? 'unset'}`}>
-                                        <i aria-hidden='true'/>
-                                        {statusLabel(issue.status)}
-                                    </span>
+                                    {issue.id && issueStatuses.length > 0 ? <select
+                                        className={`AiCrewConsole__statusSelect AiCrewConsole__status--${issue.status ?? 'unset'}`}
+                                        aria-label={`修改 ${issueLabel} 状态`}
+                                        value={issue.status ?? ''}
+                                        disabled={statusSubmittingWorkspaces.includes(workspace)}
+                                        onChange={(event) => {
+                                            if (event.target.value !== issue.status) {
+                                                setStatusError(false);
+                                                void updateIssueStatus(issue, event.target.value, workspace);
+                                            }
+                                        }}
+                                    >
+                                        {!issue.status && <option value=''>{'Not set'}</option>}
+                                        {issue.status && !issueStatuses.some((item) => item.key === issue.status) && <option value={issue.status}>{statusName(issue.status)}</option>}
+                                        {issueStatuses.map((item) => <option key={item.key} value={item.key}>{statusName(item.key)}</option>)}
+                                    </select> : <span className={`AiCrewConsole__status AiCrewConsole__status--${issue.status ?? 'unset'}`}><i aria-hidden='true'/>{statusName(issue.status)}</span>}
                                 </article>;
                             })}
                         </div>

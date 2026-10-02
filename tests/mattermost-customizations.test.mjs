@@ -1,9 +1,43 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {createRequire} from 'node:module';
 
 import * as customizations from '../scripts/apply-mattermost-customizations.mjs';
 
 const {patchProductMenu, patchRootRoutes, patchWebpack} = customizations;
+const requireWebapp = createRequire(new URL('../upstream/mattermost/webapp/package.json', import.meta.url));
+const sass = requireWebapp('sass');
+
+test('sidebar Sass patch preserves CSS and removes mixed declaration warnings', () => {
+  const source = `.sidebar--right--width-holder {
+    @media screen and (max-width: 768px) { display: none; }
+    body:not(.layout-changing) & { transition: width 0.25s; }
+    width: var(--overrideRhsWidth, 400px);
+}
+.sidebar--right {
+    width: var(--overrideRhsWidth, 400px);
+    &:not(.expanded):not(.resize-disabled) { min-width: 400px; }
+    height: 100%;
+    padding: 0;
+    transform: translateX(100%);
+    .sidebar-right__table { display: table; }
+}`;
+  const compile = (input) => {
+    const warnings = [];
+    const {css} = sass.compileString(input, {
+      logger: {warn(_message, options) { if (options.deprecationType?.id === 'mixed-decls') warnings.push(options); }},
+    });
+    return {css, warnings};
+  };
+  const before = compile(source);
+  assert.ok(before.warnings.length > 0);
+  const patched = customizations.patchSidebarRightSass(source);
+  assert.equal(customizations.patchSidebarRightSass(patched), patched);
+  const after = compile(patched);
+  assert.equal(after.warnings.length, 0);
+  assert.equal(after.css, before.css);
+  assert.throws(() => customizations.patchSidebarRightSass('changed upstream'), /sidebar Sass.*anchor/);
+});
 
 test('adds the ai-crew route exactly once', () => {
   const source = [

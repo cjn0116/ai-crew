@@ -9,12 +9,6 @@ import {redactSecrets} from '../src/redaction.ts';
 import {buildServer} from '../src/server.ts';
 import {buildMattermostWebSocketTarget} from '../src/websocket-proxy.ts';
 
-const overview = {
-  ok: true,
-  mattermost: [{team: 'synapse-os', name: 'synapse-os', member_count: 21, channels: []}],
-  multica: [{workspace: 'synapse-os', slug: 'synapse-os', issue_prefix: 'SYNA', agents: [], projects: [{title: '应用治理', status: 'in_progress', issue_count: 7}]}],
-};
-
 test('defaults to a loopback-only listener', () => {
   assert.deepEqual(loadConfig({}), {host: '127.0.0.1', port: 4174});
 });
@@ -40,13 +34,19 @@ test('preserves credential status while redacting credential values', () => {
   });
 });
 
-test('serves health, identity, and normalized Multica overview without credentials', async () => {
+test('serves health, identity, and Multica workspaces without running the full overview', async () => {
   const app = buildServer({
     runAiCrew: async (command) => {
       if (command === 'whoami') {
         return {ok: true, credential: {uid: 'caojn', mattermost: {email: 'caojn@sanywind.net', token: '(有)'}}};
       }
-      return overview;
+      if (command === 'workspaces') {
+        return {ok: true, workspaces: [
+          {id: 'w1', name: 'synapse-os', slug: 'synapse-os', issue_prefix: 'SYNA', token: 'must-not-leak'},
+          {id: 'w2', name: '解决方案作战中心', slug: 'solution-ops', issue_prefix: 'SOLC'},
+        ]};
+      }
+      throw new Error(`unexpected command: ${command}`);
     },
   });
 
@@ -58,8 +58,20 @@ test('serves health, identity, and normalized Multica overview without credentia
   assert.equal(identity.body.includes('token'), false);
 
   const workspaces = await app.inject({method: 'GET', url: '/api/ai-crew/workspaces'});
-  assert.deepEqual(workspaces.json(), {ok: true, workspaces: overview.multica});
+  assert.deepEqual(workspaces.json(), {ok: true, workspaces: [
+    {workspace: 'synapse-os', slug: 'synapse-os', issue_prefix: 'SYNA'},
+    {workspace: '解决方案作战中心', slug: 'solution-ops', issue_prefix: 'SOLC'},
+  ]});
+  assert.equal(workspaces.body.includes('must-not-leak'), false);
 
+  await app.close();
+});
+
+test('workspace CLI failure returns a controlled gateway error', async () => {
+  const app = buildServer({runAiCrew: async () => { throw new Error('private upstream failure'); }});
+  const response = await app.inject({method: 'GET', url: '/api/ai-crew/workspaces'});
+  assert.equal(response.statusCode, 502);
+  assert.deepEqual(response.json(), {ok: false, error: 'Multica workspaces are unavailable'});
   await app.close();
 });
 
@@ -87,6 +99,65 @@ test('serves projects and issues for a validated workspace slug', async () => {
 
   const invalid = await app.inject({method: 'GET', url: '/api/ai-crew/projects?workspace=../secret'});
   assert.equal(invalid.statusCode, 400);
+  await app.close();
+});
+
+test('lists the active Multica status catalog without exposing its token', async () => {
+  const calls: Array<{url: string; authorization: string}> = [];
+  const app = buildServer({
+    credentials: async () => ({base: 'https://gateway.example/root', mattermostToken: 'mm-secret', multicaToken: 'mc-secret'}),
+    fetchImpl: async (input, init) => {
+      calls.push({url: String(input), authorization: new Headers(init?.headers).get('authorization') ?? ''});
+      return new Response(JSON.stringify({statuses: [
+        {key: 'todo', name: 'Todo', category: 'unstarted'},
+        {key: 'qa', name: 'QA', category: 'started', token: 'upstream-secret'},
+      ]}), {status: 200, headers: {'content-type': 'application/json'}});
+    },
+  });
+
+  const response = await app.inject({method: 'GET', url: '/api/ai-crew/issue-statuses?workspace=synapse-os'});
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), {ok: true, workspace: 'synapse-os', statuses: [
+    {key: 'todo', name: 'Todo', category: 'unstarted'},
+    {key: 'qa', name: 'QA', category: 'started'},
+  ]});
+  assert.deepEqual(calls, [{url: 'https://gateway.example/root/multica/api/issue-statuses?workspace_slug=synapse-os', authorization: 'Bearer mc-secret'}]);
+  assert.equal(response.body.includes('secret'), false);
+  await app.close();
+});
+
+test('updates only one confirmed issue status with the server-side Multica token', async () => {
+  const calls: Array<{url: string; method: string; authorization: string; body: unknown}> = [];
+  const app = buildServer({
+    credentials: async () => ({base: 'https://gateway.example/root', mattermostToken: 'mm-secret', multicaToken: 'mc-secret'}),
+    fetchImpl: async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method ?? 'GET',
+        authorization: new Headers(init?.headers).get('authorization') ?? '',
+        body: JSON.parse(String(init?.body)),
+      });
+      return new Response(JSON.stringify({id: 'i1', status: 'qa'}), {status: 200, headers: {'content-type': 'application/json'}});
+    },
+  });
+
+  const response = await app.inject({
+    method: 'PUT',
+    url: '/api/ai-crew/issues/i1/status',
+    headers: {authorization: 'Bearer attacker-token'},
+    payload: {workspace: 'synapse-os', status: 'qa', confirm: true},
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), {ok: true});
+  assert.deepEqual(calls, [{
+    url: 'https://gateway.example/root/multica/api/issues/i1?workspace_slug=synapse-os',
+    method: 'PUT',
+    authorization: 'Bearer mc-secret',
+    body: {status: 'qa'},
+  }]);
+  assert.equal(response.body.includes('secret'), false);
   await app.close();
 });
 

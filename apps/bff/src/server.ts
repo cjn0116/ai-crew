@@ -24,6 +24,8 @@ type Credential = {
 };
 
 const workspacePattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const issueIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const issueStatusPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 function rejectEncodedMmGetPath(rawUrl: string | undefined) {
   if (!rawUrl) {
@@ -105,11 +107,21 @@ export function buildServer(options: ServerOptions = {}) {
   });
 
   app.get('/api/ai-crew/workspaces', async (_request, reply) => {
-    const result = await runAiCrew('overview');
-    if (result.ok !== true || !Array.isArray(result.multica)) {
-      return reply.code(502).send({ok: false, error: 'Multica overview is unavailable'});
+    try {
+      const result = await runAiCrew('workspaces');
+      if (result.ok !== true || !Array.isArray(result.workspaces)) {
+        return reply.code(502).send({ok: false, error: 'Multica workspaces are unavailable'});
+      }
+      const workspaces = result.workspaces.flatMap((item: unknown) => {
+        if (!item || typeof item !== 'object') return [];
+        const {name, slug, issue_prefix} = item as Record<string, unknown>;
+        if (typeof name !== 'string' || typeof slug !== 'string' || !workspacePattern.test(slug)) return [];
+        return [{workspace: name, slug, ...(typeof issue_prefix === 'string' ? {issue_prefix} : {})}];
+      });
+      return {ok: true, workspaces};
+    } catch {
+      return reply.code(502).send({ok: false, error: 'Multica workspaces are unavailable'});
     }
-    return {ok: true, workspaces: result.multica};
   });
 
   for (const resource of ['projects', 'issues'] as const) {
@@ -127,6 +139,69 @@ export function buildServer(options: ServerOptions = {}) {
       return {ok: true, workspace, [resource]: items};
     });
   }
+
+  app.get<{Querystring: {workspace?: string}}>('/api/ai-crew/issue-statuses', async (request, reply) => {
+    const workspace = request.query.workspace;
+    if (!workspace || !workspacePattern.test(workspace)) {
+      return reply.code(400).send({ok: false, error: 'workspace must be a valid slug'});
+    }
+    try {
+      const credential = await credentials();
+      if (!credential.multicaToken) {
+        return reply.code(502).send({ok: false, error: 'Multica credentials are unavailable'});
+      }
+      const response = await fetchImpl(`${credential.base.replace(/\/$/, '')}/multica/api/issue-statuses?workspace_slug=${encodeURIComponent(workspace)}`, {
+        headers: {authorization: `Bearer ${credential.multicaToken}`, accept: 'application/json'},
+      });
+      if (!response.ok) {
+        return reply.code(502).send({ok: false, error: 'Multica issue statuses are unavailable'});
+      }
+      const data: unknown = await response.json();
+      if (!data || typeof data !== 'object' || !('statuses' in data) || !Array.isArray(data.statuses)) {
+        return reply.code(502).send({ok: false, error: 'Multica issue statuses are unavailable'});
+      }
+      const statuses = data.statuses.flatMap((item: unknown) => {
+        if (!item || typeof item !== 'object') {
+          return [];
+        }
+        const {key, name, category} = item as Record<string, unknown>;
+        if (typeof key !== 'string' || !issueStatusPattern.test(key) || typeof name !== 'string') {
+          return [];
+        }
+        return [{key, name, ...(typeof category === 'string' ? {category} : {})}];
+      });
+      return {ok: true, workspace, statuses};
+    } catch {
+      return reply.code(502).send({ok: false, error: 'Multica issue statuses are unavailable'});
+    }
+  });
+
+  app.put<{Params: {id: string}; Body: unknown}>('/api/ai-crew/issues/:id/status', async (request, reply) => {
+    const body = request.body && typeof request.body === 'object' && !Array.isArray(request.body) ? request.body as Record<string, unknown> : {};
+    const {workspace, status, confirm} = body;
+    if (!issueIdPattern.test(request.params.id) || typeof workspace !== 'string' || !workspacePattern.test(workspace) ||
+        typeof status !== 'string' || !issueStatusPattern.test(status) || confirm !== true ||
+        Object.keys(body).some((key) => !['workspace', 'status', 'confirm'].includes(key))) {
+      return reply.code(400).send({ok: false, error: 'a valid issue, workspace, status and confirmation are required'});
+    }
+    try {
+      const credential = await credentials();
+      if (!credential.multicaToken) {
+        return reply.code(502).send({ok: false, error: 'Multica credentials are unavailable'});
+      }
+      const response = await fetchImpl(`${credential.base.replace(/\/$/, '')}/multica/api/issues/${encodeURIComponent(request.params.id)}?workspace_slug=${encodeURIComponent(workspace)}`, {
+        method: 'PUT',
+        headers: {authorization: `Bearer ${credential.multicaToken}`, 'content-type': 'application/json', accept: 'application/json'},
+        body: JSON.stringify({status}),
+      });
+      if (!response.ok) {
+        return reply.code(502).send({ok: false, error: 'Multica issue status update failed'});
+      }
+      return {ok: true};
+    } catch {
+      return reply.code(502).send({ok: false, error: 'Multica issue status update failed'});
+    }
+  });
 
   const proxyMattermost = async (request: FastifyRequest, reply: FastifyReply) => {
       const credential = await credentials();

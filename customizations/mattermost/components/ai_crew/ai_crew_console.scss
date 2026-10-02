@@ -271,7 +271,7 @@ button, a {
         background: var(--multica-card);
         color: var(--multica-muted);
         font-size: 12px;
-        span:last-child { width: 80px; }
+        span:last-child { width: 112px; }
     }
     &__row {
         display: grid;
@@ -279,7 +279,7 @@ button, a {
         align-items: center;
         gap: 12px;
         padding: 12px 24px;
-        grid-template-columns: 12px minmax(0, 1fr) 80px;
+        grid-template-columns: 12px minmax(0, 1fr) 112px;
         border-bottom: 1px solid rgba(var(--multica-ink-rgb), 0.08);
         &:hover { background: var(--multica-hover); }
     }
@@ -332,6 +332,25 @@ button, a {
         &--todo, &--open { color: #1d63a6; }
         &--done { color: #237a4b; }
     }
+    &__statusSelect {
+        width: 100%;
+        min-width: 0;
+        padding: 5px 6px;
+        appearance: none;
+        border: 1px solid transparent;
+        border-radius: 5px;
+        background-color: transparent;
+        color: var(--multica-ink);
+        font: 500 12px/18px 'Open Sans', sans-serif;
+        cursor: pointer;
+        &:hover, &:focus-visible {
+            appearance: menulist;
+            border-color: var(--multica-border);
+            background-color: var(--multica-card);
+        }
+        &:disabled { cursor: wait; opacity: 0.55; }
+        &:focus-visible { outline: 2px solid var(--multica-accent); outline-offset: 1px; }
+    }
     &__state {
         display: flex;
         min-height: 280px;
@@ -374,8 +393,8 @@ button, a {
         &__projectNav { border-radius: 12px; }
         &__main { border-radius: 12px 12px 0 0; }
         &__heading > span { display: none; }
-        &__row { padding: 10px 16px; gap: 8px; grid-template-columns: 12px minmax(0, 1fr) 64px; }
-        &__listHeading { padding: 0 16px 0 36px; span:last-child { width: 64px; } }
+        &__row { padding: 10px 16px; gap: 8px; grid-template-columns: 12px minmax(0, 1fr) 96px; }
+        &__listHeading { padding: 0 16px 0 36px; span:last-child { width: 96px; } }
         &__issueHeader { flex-direction: column; gap: 2px; }
     }
 }

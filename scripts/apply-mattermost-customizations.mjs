@@ -752,6 +752,17 @@ export function patchWebpack(source) {
   );
 }
 
+export function patchSidebarRightSass(source) {
+  const holder = /^(\.sidebar--right--width-holder \{\n)([\s\S]*?)(^    width: var\(--overrideRhsWidth, 400px\);\n)/m;
+  const right = /^(\.sidebar--right \{\n    width: var\(--overrideRhsWidth, 400px\);\n)([\s\S]*?)(^    height: 100%;\n    padding: 0;\n    transform: translateX\(100%\);\n)/m;
+  if (!holder.test(source) || !right.test(source)) {
+    throw new Error('Mattermost sidebar Sass declaration anchor not found');
+  }
+  return source
+    .replace(holder, (match, prefix, nested, declaration) => nested ? `${prefix}${declaration}\n${nested.trimEnd()}\n` : match)
+    .replace(right, (match, prefix, nested, declarations) => nested ? `${prefix}${declarations}\n${nested.replace(/^\n/, '').trimEnd()}\n` : match);
+}
+
 export async function applyCustomizations(repoRoot = new URL('../', import.meta.url)) {
   const channels = new URL('upstream/mattermost/webapp/channels/src/', repoRoot);
   const rootPath = new URL('components/root/root.tsx', channels);
@@ -769,10 +780,18 @@ export async function applyCustomizations(repoRoot = new URL('../', import.meta.
   const rightControlsPath = new URL('components/global_header/right_controls/right_controls.tsx', channels);
   const appBarPath = new URL('components/app_bar/app_bar.tsx', channels);
   const webpackPath = new URL('upstream/mattermost/webapp/channels/webpack.config.js', repoRoot);
+  const sidebarRightSassPath = new URL('sass/layout/_sidebar-right.scss', channels);
   const overlay = new URL('customizations/mattermost/components/ai_crew/', repoRoot);
   const destination = new URL('components/ai_crew/', channels);
+  const avatarOverlay = new URL('customizations/mattermost/components/avatar/avatar.tsx', repoRoot);
+  const avatarDestination = new URL('components/widgets/users/avatar/avatar.tsx', channels);
 
   await cp(overlay, destination, {recursive: true, force: true});
+  await cp(avatarOverlay, avatarDestination, {force: true});
+  await cp(
+    new URL('customizations/mattermost/components/avatar/avatar.scss', repoRoot),
+    new URL('components/widgets/users/avatar/avatar.scss', channels),
+  );
   // Compile CSS to a string for the shadow root, never the document stylesheet.
   const require = createRequire(new URL('upstream/mattermost/webapp/package.json', repoRoot));
   const sass = require('sass');
@@ -798,9 +817,14 @@ export async function applyCustomizations(repoRoot = new URL('../', import.meta.
     new URL('customizations/mattermost/tests/product_menu.test.tsx', repoRoot),
     new URL('components/global_header/left_controls/product_menu/product_menu.test.tsx', channels),
   );
+  await cp(
+    new URL('customizations/mattermost/tests/avatar.test.tsx', repoRoot),
+    new URL('components/widgets/users/avatar/avatar.test.tsx', channels),
+  );
   // The replacement menu has behavioral assertions instead of upstream snapshots.
   await rm(new URL('components/global_header/left_controls/product_menu/__snapshots__/product_menu.test.tsx.snap', channels), {force: true});
   await writeFile(webpackPath, patchWebpack(await readFile(webpackPath, 'utf8')));
+  await writeFile(sidebarRightSassPath, patchSidebarRightSass(await readFile(sidebarRightSassPath, 'utf8')));
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

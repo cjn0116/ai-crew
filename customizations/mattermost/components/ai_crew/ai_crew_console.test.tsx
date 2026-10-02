@@ -29,8 +29,19 @@ const responses: Record<string, unknown> = {
             {id: 'i2', title: '优化移动端导航', status: 'in_progress', identifier: 'SYNA-43', project: {id: 'p2', title: '平台体验'}},
         ],
     },
+    '/api/ai-crew/issue-statuses?workspace=synapse-os': {ok: true, statuses: [
+        {key: 'todo', name: 'Todo', category: 'unstarted'},
+        {key: 'in_progress', name: 'In Progress', category: 'started'},
+        {key: 'in_review', name: 'In Review', category: 'started'},
+        {key: 'done', name: 'Done', category: 'done'},
+        {key: 'qa', name: 'QA', category: 'started'},
+    ]},
     '/api/ai-crew/projects?workspace=wind-rd': {ok: true, projects: [{id: 'p3', title: '叶片设计', status: 'in_progress', issue_count: 1}]},
     '/api/ai-crew/issues?workspace=wind-rd': {ok: true, issues: [{id: 'i3', title: '校核叶片载荷', status: 'open', identifier: 'WIND-7', project_id: 'p3'}]},
+    '/api/ai-crew/issue-statuses?workspace=wind-rd': {ok: true, statuses: [
+        {key: 'todo', name: 'Todo', category: 'unstarted'},
+        {key: 'done', name: 'Done', category: 'done'},
+    ]},
 };
 
 describe('AiCrewConsole', () => {
@@ -451,9 +462,109 @@ describe('AiCrewConsole', () => {
         })) as jest.Mock;
         render(<AiCrewConsole/>);
         expect(await screen.findByText('待办测试')).toBeInTheDocument();
-        expect(screen.getByText('待处理')).toBeInTheDocument();
-        expect(screen.getByText('审核中')).toBeInTheDocument();
-        expect(screen.getByText('已完成')).toBeInTheDocument();
+        expect((screen.getByRole('combobox', {name: '修改 待办测试 状态'}) as HTMLSelectElement).selectedOptions[0]).toHaveTextContent('Todo');
+        expect((screen.getByRole('combobox', {name: '修改 审核测试 状态'}) as HTMLSelectElement).selectedOptions[0]).toHaveTextContent('In Review');
+        expect((screen.getByRole('combobox', {name: '修改 完成测试 状态'}) as HTMLSelectElement).selectedOptions[0]).toHaveTextContent('Done');
+    });
+
+    it('uses an English status label even if the catalog name is localized', async () => {
+        global.fetch = jest.fn(async (input) => ({
+            ok: true,
+            json: async () => String(input).includes('/issue-statuses?workspace=synapse-os') ?
+                {statuses: [{key: 'in_progress', name: '进行中', category: 'started'}, {key: 'qa', name: 'QA', category: 'started'}]} :
+                responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+
+        const control = await screen.findByRole('combobox', {name: '修改 SYNA-43 状态'});
+        expect((control as HTMLSelectElement).selectedOptions[0]).toHaveTextContent('In Progress');
+        fireEvent.change(control, {target: {value: 'qa'}});
+        expect(screen.queryByRole('alertdialog', {name: '确认修改工单状态'})).not.toBeInTheDocument();
+    });
+
+    it('saves a selected status without opening a confirmation dialog', async () => {
+        render(<AiCrewConsole/>);
+        const control = await screen.findByRole('combobox', {name: '修改 SYNA-43 状态'});
+
+        fireEvent.change(control, {target: {value: 'qa'}});
+
+        await waitFor(() => expect((global.fetch as jest.Mock).mock.calls.some(([input, init]) => String(input) === '/api/ai-crew/issues/i2/status' && init?.method === 'PUT')).toBe(true));
+        expect(screen.queryByRole('alertdialog', {name: '确认修改工单状态'})).not.toBeInTheDocument();
+        expect(control).toHaveValue('in_progress');
+    });
+
+    it('writes the selected status and reloads only the active workspace', async () => {
+        let latestIssues = responses['/api/ai-crew/issues?workspace=synapse-os'];
+        global.fetch = jest.fn(async (input, init) => {
+            if (init?.method === 'PUT') {
+                latestIssues = {issues: [{id: 'i2', title: '优化移动端导航', status: 'qa', identifier: 'SYNA-43'}]};
+                return {ok: true, json: async () => ({ok: true})};
+            }
+            return {ok: true, json: async () => String(input).includes('/issues?workspace=synapse-os') ? latestIssues : responses[String(input)]};
+        }) as jest.Mock;
+        render(<AiCrewConsole/>);
+        fireEvent.change(await screen.findByRole('combobox', {name: '修改 SYNA-43 状态'}), {target: {value: 'qa'}});
+
+        await waitFor(() => expect(screen.getByRole('combobox', {name: '修改 SYNA-43 状态'})).toHaveValue('qa'));
+        expect(screen.queryByRole('alertdialog', {name: '确认修改工单状态'})).not.toBeInTheDocument();
+        const writes = (global.fetch as jest.Mock).mock.calls.filter(([, init]) => init?.method === 'PUT');
+        expect(writes).toHaveLength(1);
+        expect(writes[0][0]).toBe('/api/ai-crew/issues/i2/status');
+        expect(JSON.parse(writes[0][1].body)).toEqual({workspace: 'synapse-os', status: 'qa', confirm: true});
+    });
+
+    it('retains the old status and offers a retry when updating fails', async () => {
+        global.fetch = jest.fn(async (input, init) => init?.method === 'PUT' ?
+            {ok: false, status: 502, json: async () => ({})} :
+            {ok: true, json: async () => responses[String(input)]}) as jest.Mock;
+        render(<AiCrewConsole/>);
+        const control = await screen.findByRole('combobox', {name: '修改 SYNA-43 状态'});
+        fireEvent.change(control, {target: {value: 'qa'}});
+
+        expect(await screen.findByText('修改工单状态失败，请重试。')).toBeInTheDocument();
+        expect(control).toHaveValue('in_progress');
+        expect(control).toBeEnabled();
+        expect(screen.queryByRole('alertdialog', {name: '确认修改工单状态'})).not.toBeInTheDocument();
+    });
+
+    it('does not offer edits when the workspace status catalog is unavailable', async () => {
+        global.fetch = jest.fn(async (input) => String(input).includes('/issue-statuses?') ?
+            {ok: false, status: 502, json: async () => ({})} :
+            {ok: true, json: async () => responses[String(input)]}) as jest.Mock;
+        render(<AiCrewConsole/>);
+
+        expect(await screen.findByText('优化移动端导航')).toBeInTheDocument();
+        expect(screen.queryByRole('combobox', {name: '修改 SYNA-43 状态'})).not.toBeInTheDocument();
+        expect(screen.getByText('In Progress')).toBeInTheDocument();
+    });
+
+    it('offers the first catalog status for an issue with no status', async () => {
+        global.fetch = jest.fn(async (input) => ({
+            ok: true,
+            json: async () => String(input).includes('/issues?workspace=synapse-os') ? {issues: [{id: 'unset', title: '未分类工单', identifier: 'SYNA-44'}]} : responses[String(input)],
+        })) as jest.Mock;
+        render(<AiCrewConsole/>);
+        const control = await screen.findByRole('combobox', {name: '修改 SYNA-44 状态'});
+        expect(control).toHaveValue('');
+        expect((control as HTMLSelectElement).selectedOptions[0]).toHaveTextContent('Not set');
+        fireEvent.change(control, {target: {value: 'todo'}});
+        await waitFor(() => expect((global.fetch as jest.Mock).mock.calls.some(([input, init]) => input === '/api/ai-crew/issues/unset/status' && init?.method === 'PUT')).toBe(true));
+        expect(screen.queryByRole('alertdialog', {name: '确认修改工单状态'})).not.toBeInTheDocument();
+    });
+
+    it('does not reload an old workspace after its status write finishes', async () => {
+        let finishWrite: (response: unknown) => void = () => {};
+        global.fetch = jest.fn((input, init) => init?.method === 'PUT' ?
+            new Promise((resolve) => { finishWrite = resolve; }) :
+            Promise.resolve({ok: true, json: async () => responses[String(input)]})) as jest.Mock;
+        render(<AiCrewConsole/>);
+        fireEvent.change(await screen.findByRole('combobox', {name: '修改 SYNA-43 状态'}), {target: {value: 'qa'}});
+        fireEvent.click(screen.getByRole('button', {name: '切换到小组：风机研发'}));
+        expect(await screen.findByRole('combobox', {name: '修改 WIND-7 状态'})).toBeEnabled();
+        await act(async () => { finishWrite({ok: true, json: async () => ({ok: true})}); });
+
+        expect(await screen.findByText('校核叶片载荷')).toBeInTheDocument();
+        expect((global.fetch as jest.Mock).mock.calls.filter(([input]) => String(input).includes('/issues?workspace=wind-rd'))).toHaveLength(1);
     });
 
     it('separates issue titles from content and expands long descriptions', async () => {
@@ -491,6 +602,12 @@ describe('AiCrewConsole', () => {
         expect(crewStyles).toMatch(/\.AiCrewConsole__issueIcon--done[^{}]*\{[^{}]*background:\s*#49b97a/);
         expect(crewStyles).toMatch(/\.AiCrewConsole__issueIcon--todo[^{}]*\{[^{}]*background:\s*#79b8f3/);
         expect(crewStyles).toMatch(/\.AiCrewConsole__issueIcon--in_review[^{}]*\{[^{}]*background:\s*#ffd35a/);
+    });
+
+    it('renders the status selector as text until hover or keyboard focus', () => {
+        expect(crewStyles).toMatch(/\.AiCrewConsole__statusSelect\s*\{[^{}]*border:\s*1px solid transparent/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__statusSelect:hover/);
+        expect(crewStyles).toMatch(/\.AiCrewConsole__statusSelect:focus-visible/);
     });
 
     it('does not match missing project IDs to unrelated or unassigned issues', async () => {
